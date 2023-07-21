@@ -1368,7 +1368,6 @@ pub async fn build_ibc_transfer<C: crate::ledger::queries::Client + Sync>(
 
     // Check source balance
     let balance_key = token::balance_key(&args.token, &source);
-
     check_balance_too_low_err(
         &args.token,
         &source,
