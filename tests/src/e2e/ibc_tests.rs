@@ -78,61 +78,18 @@ use setup::constants::*;
 use tendermint_light_client::components::io::{Io, ProdIo as TmLightClientIo};
 
 use super::helpers::wait_for_wasm_pre_compile;
-use super::setup::set_ethereum_bridge_mode;
 use crate::e2e::helpers::{find_address, get_actor_rpc, get_validator_pk};
-use crate::e2e::setup::{self, sleep, Bin, NamadaCmd, Test, Who};
+use crate::e2e::setup::{
+    self, run_hermes_cmd, set_ethereum_bridge_mode, setup_hermes, sleep, Bin,
+    NamadaCmd, Test, Who,
+};
 use crate::{run, run_as};
 
 #[test]
 fn run_ledger_ibc() -> Result<()> {
-    let (test_a, test_b) = setup_two_single_node_nets()?;
-    set_ethereum_bridge_mode(
-        &test_a,
-        &test_a.net.chain_id,
-        &Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
-    set_ethereum_bridge_mode(
-        &test_b,
-        &test_b.net.chain_id,
-        &Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
-
-    // Run Chain A
-    let mut ledger_a = run_as!(
-        test_a,
-        Who::Validator(0),
-        Bin::Node,
-        &["ledger", "run"],
-        Some(40)
-    )?;
-    ledger_a.exp_string("Namada ledger node started")?;
-    // Run Chain B
-    let mut ledger_b = run_as!(
-        test_b,
-        Who::Validator(0),
-        Bin::Node,
-        &["ledger", "run"],
-        Some(40)
-    )?;
-    ledger_b.exp_string("Namada ledger node started")?;
-    ledger_a.exp_string("This node is a validator")?;
-    ledger_b.exp_string("This node is a validator")?;
-
-    wait_for_wasm_pre_compile(&mut ledger_a)?;
-    wait_for_wasm_pre_compile(&mut ledger_b)?;
-
-    // Wait for a first block
-    ledger_a.exp_string("Committed block hash")?;
-    ledger_b.exp_string("Committed block hash")?;
-
+    let (ledger_a, ledger_b, test_a, test_b) = run_two_nets()?;
     let _bg_ledger_a = ledger_a.background();
     let _bg_ledger_b = ledger_b.background();
-
-    sleep(5);
 
     let (client_id_a, client_id_b) = create_client(&test_a, &test_b)?;
 
@@ -196,6 +153,134 @@ fn run_ledger_ibc() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn run_ledger_ibc_with_hermes() -> Result<()> {
+    let (ledger_a, ledger_b, test_a, test_b) = run_two_nets()?;
+    let _bg_ledger_a = ledger_a.background();
+    let _bg_ledger_b = ledger_b.background();
+
+    setup_hermes(&test_a, &test_b)?;
+    let port_id_a = "transfer".parse().unwrap();
+    let port_id_b = "transfer".parse().unwrap();
+    let (channel_id_a, channel_id_b) =
+        create_channel_with_hermes(&test_a, &test_b)?;
+
+    // Start relaying
+    let hermes = run_hermes(&test_a)?;
+    let _bg_hermes = hermes.background();
+
+    // Transfer 100000 from the normal account on Chain A to Chain B
+    let receiver = find_address(&test_b, BERTHA)?;
+    transfer(
+        &test_a,
+        ALBERT,
+        &receiver,
+        NAM,
+        "100000",
+        &port_id_a,
+        &channel_id_a,
+        None,
+        None,
+    )?;
+    wait_for_packet_relay(&port_id_a, &channel_id_a, &test_a)?;
+    check_balances(&port_id_b, &channel_id_b, &test_a, &test_b)?;
+
+    // Transfer 50000 received over IBC on Chain B
+    transfer_received_token(&port_id_b, &channel_id_b, &test_b)?;
+    check_balances_after_non_ibc(&port_id_b, &channel_id_b, &test_b)?;
+
+    // Transfer 50000 back from the origin-specific account on Chain B to Chain
+    // A
+    let token = find_address(&test_b, NAM)?.to_string();
+    let receiver = find_address(&test_a, ALBERT)?;
+    // Chain A was the source for the sent token
+    let denom_raw = format!("{}/{}/{}", port_id_b, channel_id_b, token);
+    let ibc_token = ibc_token(denom_raw).to_string();
+    // Send a token from Chain B
+    transfer(
+        &test_b,
+        BERTHA,
+        &receiver,
+        ibc_token,
+        "50000",
+        &port_id_b,
+        &channel_id_b,
+        None,
+        None,
+    )?;
+    wait_for_packet_relay(&port_id_a, &channel_id_a, &test_a)?;
+    check_balances_after_back(&port_id_b, &channel_id_b, &test_a, &test_b)?;
+
+    // Transfer a token and it will time out and refund
+    let receiver = find_address(&test_b, BERTHA)?;
+    // Send a token from Chain A
+    transfer(
+        &test_a,
+        ALBERT,
+        &receiver,
+        NAM,
+        "100000",
+        &port_id_a,
+        &channel_id_a,
+        Some(Duration::new(5, 0)),
+        None,
+    )?;
+    // wait for the timeout and the refund
+    wait_for_packet_relay(&port_id_a, &channel_id_a, &test_a)?;
+    // The balance should not be changed
+    check_balances_after_back(&port_id_b, &channel_id_b, &test_a, &test_b)?;
+
+    Ok(())
+}
+
+fn run_two_nets() -> Result<(NamadaCmd, NamadaCmd, Test, Test)> {
+    let (test_a, test_b) = setup_two_single_node_nets()?;
+    set_ethereum_bridge_mode(
+        &test_a,
+        &test_a.net.chain_id,
+        &Who::Validator(0),
+        ethereum_bridge::ledger::Mode::Off,
+        None,
+    );
+    set_ethereum_bridge_mode(
+        &test_b,
+        &test_b.net.chain_id,
+        &Who::Validator(0),
+        ethereum_bridge::ledger::Mode::Off,
+        None,
+    );
+
+    // Run Chain A
+    let mut ledger_a = run_as!(
+        test_a,
+        Who::Validator(0),
+        Bin::Node,
+        &["ledger", "run"],
+        Some(40)
+    )?;
+    ledger_a.exp_string("Namada ledger node started")?;
+    // Run Chain B
+    let mut ledger_b = run_as!(
+        test_b,
+        Who::Validator(0),
+        Bin::Node,
+        &["ledger", "run"],
+        Some(40)
+    )?;
+    ledger_b.exp_string("Namada ledger node started")?;
+    ledger_a.exp_string("This node is a validator")?;
+    ledger_b.exp_string("This node is a validator")?;
+
+    wait_for_wasm_pre_compile(&mut ledger_a)?;
+    wait_for_wasm_pre_compile(&mut ledger_b)?;
+
+    // Wait for a first block
+    ledger_a.exp_string("Committed block hash")?;
+    ledger_b.exp_string("Committed block hash")?;
+
+    Ok((ledger_a, ledger_b, test_a, test_b))
+}
+
 fn setup_two_single_node_nets() -> Result<(Test, Test)> {
     // epoch per 100 seconds
     let update_genesis = |mut genesis: GenesisConfig| {
@@ -210,6 +295,88 @@ fn setup_two_single_node_nets() -> Result<(Test, Test)> {
         setup::network(update_genesis, None)?,
         setup::network(update_genesis_b, None)?,
     ))
+}
+
+fn create_channel_with_hermes(
+    test_a: &Test,
+    test_b: &Test,
+) -> Result<(ChannelId, ChannelId)> {
+    let args = [
+        "create",
+        "channel",
+        "--a-chain",
+        &test_a.net.chain_id.to_string(),
+        "--b-chain",
+        &test_b.net.chain_id.to_string(),
+        "--a-port",
+        "transfer",
+        "--b-port",
+        "transfer",
+        "--new-client-connection",
+        "--yes",
+    ];
+
+    let mut hermes = run_hermes_cmd(test_a, args, Some(120))?;
+    let (channel_id_a, channel_id_b) =
+        get_channel_ids_from_hermes_output(&mut hermes)?;
+    hermes.assert_success();
+
+    Ok((channel_id_a, channel_id_b))
+}
+
+fn get_channel_ids_from_hermes_output(
+    hermes: &mut NamadaCmd,
+) -> Result<(ChannelId, ChannelId)> {
+    let (_, matched) =
+        hermes.exp_regex("channel handshake already finished .*")?;
+
+    let regex = regex::Regex::new(r"channel-[0-9]+").unwrap();
+    let mut iter = regex.find_iter(&matched);
+    let channel_id_a = iter.next().unwrap().as_str().parse().unwrap();
+    let channel_id_b = iter.next().unwrap().as_str().parse().unwrap();
+
+    Ok((channel_id_a, channel_id_b))
+}
+
+fn run_hermes(test: &Test) -> Result<NamadaCmd> {
+    let args = ["start"];
+    let mut hermes = run_hermes_cmd(test, args, Some(40))?;
+    hermes.exp_string("Hermes has started")?;
+    Ok(hermes)
+}
+
+fn wait_for_packet_relay(
+    port_id: &PortId,
+    channel_id: &ChannelId,
+    test: &Test,
+) -> Result<()> {
+    let args = [
+        "--json",
+        "query",
+        "packet",
+        "pending",
+        "--chain",
+        test.net.chain_id.as_str(),
+        "--port",
+        port_id.as_str(),
+        "--channel",
+        channel_id.as_str(),
+    ];
+    for _ in 0..5 {
+        sleep(10);
+        let mut hermes = run_hermes_cmd(test, args, Some(40))?;
+        // Check no pending packet
+        if hermes
+            .exp_string(
+                "\"dst\":{\"unreceived_acks\":[],\"unreceived_packets\":[]},\"\
+                 src\":{\"unreceived_acks\":[],\"unreceived_packets\":[]}",
+            )
+            .is_ok()
+        {
+            return Ok(());
+        }
+    }
+    Err(eyre!("Pending packet is still left"))
 }
 
 fn create_client(test_a: &Test, test_b: &Test) -> Result<(ClientId, ClientId)> {
