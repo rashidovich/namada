@@ -840,7 +840,7 @@ pub fn setup_hermes(test_a: &Test, test_b: &Test) -> Result<()> {
     let wallet_dir_a = wallet_dir.join(chain_a_id);
     std::fs::create_dir_all(&wallet_dir_a).unwrap();
     std::fs::copy(
-        wallet::wallet_file(chain_dir.clone()),
+        wallet::wallet_file(chain_dir),
         wallet::wallet_file(wallet_dir_a),
     )
     .unwrap();
@@ -850,7 +850,7 @@ pub fn setup_hermes(test_a: &Test, test_b: &Test) -> Result<()> {
     let wallet_dir_b = wallet_dir.join(chain_b_id);
     std::fs::create_dir_all(&wallet_dir_b).unwrap();
     std::fs::copy(
-        wallet::wallet_file(chain_dir.clone()),
+        wallet::wallet_file(chain_dir),
         wallet::wallet_file(wallet_dir_b),
     )
     .unwrap();

@@ -506,10 +506,10 @@ pub fn make_hermes_config(test_a: &Test, test_b: &Test) -> Result<()> {
     telemetry.insert("port".to_owned(), Value::Integer(3001));
     config.insert("telemetry".to_owned(), Value::Table(telemetry));
 
-    let mut chains = Vec::new();
-    chains.push(make_hermes_chain_config(test_a));
-    chains.push(make_hermes_chain_config(test_b));
-
+    let chains = vec![
+        make_hermes_chain_config(test_a),
+        make_hermes_chain_config(test_b),
+    ];
     config.insert("chains".to_owned(), Value::Array(chains));
 
     let toml_string = toml::to_string(&Value::Table(config)).unwrap();
