@@ -176,10 +176,12 @@ fn run_ledger_ibc_with_hermes() -> Result<()> {
         &receiver,
         NAM,
         "100000",
+        ALBERT_KEY,
         &port_id_a,
         &channel_id_a,
         None,
         None,
+        false,
     )?;
     wait_for_packet_relay(&port_id_a, &channel_id_a, &test_a)?;
     check_balances(&port_id_b, &channel_id_b, &test_a, &test_b)?;
@@ -202,10 +204,12 @@ fn run_ledger_ibc_with_hermes() -> Result<()> {
         &receiver,
         ibc_token,
         "50000",
+        BERTHA_KEY,
         &port_id_b,
         &channel_id_b,
         None,
         None,
+        false,
     )?;
     wait_for_packet_relay(&port_id_a, &channel_id_a, &test_a)?;
     check_balances_after_back(&port_id_b, &channel_id_b, &test_a, &test_b)?;
@@ -219,10 +223,12 @@ fn run_ledger_ibc_with_hermes() -> Result<()> {
         &receiver,
         NAM,
         "100000",
+        ALBERT_KEY,
         &port_id_a,
         &channel_id_a,
         Some(Duration::new(5, 0)),
         None,
+        false,
     )?;
     // wait for the timeout and the refund
     wait_for_packet_relay(&port_id_a, &channel_id_a, &test_a)?;
