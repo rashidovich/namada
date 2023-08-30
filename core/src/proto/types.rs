@@ -1774,10 +1774,8 @@ impl Tx {
         signer: Option<Address>,
     ) -> &mut Self {
         // The inner tx signer signs the Raw version of the Header
-        let mut hashes = vec![self.raw_header_hash()];
+        let hashes = vec![self.raw_header_hash()];
         self.protocol_filter();
-        let sections_hashes = self.inner_section_targets();
-        hashes.extend(sections_hashes);
 
         self.add_section(Section::Signature(Signature::new(
             hashes,
