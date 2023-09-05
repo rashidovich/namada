@@ -234,7 +234,7 @@ mod test_process_tx {
             .set_data(Data::new("transaction data".as_bytes().to_owned()))
             .clone();
         tx.add_section(Section::Signature(Signature::new(
-            vec![tx.raw_header_hash()],
+            tx.raw_header_hash(),
             [(0, gen_keypair())].into_iter().collect(),
             None,
         )));
@@ -269,7 +269,7 @@ mod test_process_tx {
         tx.set_code(Code::new("wasm code".as_bytes().to_owned()));
         tx.set_data(Data::new("transaction data".as_bytes().to_owned()));
         tx.add_section(Section::Signature(Signature::new(
-            tx.sechashes(),
+            tx.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -354,7 +354,7 @@ fn test_process_tx_decrypted_signed() {
     let ed_sig =
         ed25519::Signature::try_from_slice([0u8; 64].as_ref()).unwrap();
     let mut sig_sec = Signature::new(
-        vec![decrypted.header_hash()],
+        decrypted.header_hash(),
         [(0, gen_keypair())].into_iter().collect(),
         None,
     );

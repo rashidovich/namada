@@ -170,7 +170,7 @@ mod tests {
         tx.set_code(Code::new(tx_code));
         tx.set_data(Data::new(tx_data));
         tx.add_section(Section::Signature(Signature::new(
-            tx.sechashes(),
+            tx.header_hash(),
             [(0, keypair_1())].into_iter().collect(),
             None,
         )));

@@ -55,7 +55,7 @@ fn vp_user(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&defaults::albert_keypair()),
+        Some(defaults::albert_keypair()),
     );
 
     let received_transfer = generate_tx(
@@ -70,7 +70,7 @@ fn vp_user(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&defaults::bertha_keypair()),
+        Some(defaults::bertha_keypair()),
     );
 
     let vp_validator_hash = shell
@@ -93,7 +93,7 @@ fn vp_user(c: &mut Criterion) {
         data,
         None,
         Some(vec![extra_section]),
-        Some(&defaults::albert_keypair()),
+        Some(defaults::albert_keypair()),
     );
 
     let vote = generate_tx(
@@ -106,7 +106,7 @@ fn vp_user(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&defaults::albert_keypair()),
+        Some(defaults::albert_keypair()),
     );
 
     let pos = generate_tx(
@@ -118,7 +118,7 @@ fn vp_user(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&defaults::albert_keypair()),
+        Some(defaults::albert_keypair()),
     );
 
     for (signed_tx, bench_name) in [
@@ -196,7 +196,7 @@ fn vp_implicit(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&implicit_account),
+        Some(implicit_account.clone()),
     );
 
     let received_transfer = generate_tx(
@@ -211,7 +211,7 @@ fn vp_implicit(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&defaults::bertha_keypair()),
+        Some(defaults::bertha_keypair()),
     );
 
     let reveal_pk = generate_tx(
@@ -231,7 +231,7 @@ fn vp_implicit(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&implicit_account),
+        Some(implicit_account.clone()),
     );
 
     let vote = generate_tx(
@@ -245,7 +245,7 @@ fn vp_implicit(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&implicit_account),
+        Some(implicit_account.clone()),
     );
 
     for (tx, bench_name) in [
@@ -339,7 +339,7 @@ fn vp_validator(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&defaults::validator_keypair()),
+        Some(defaults::validator_keypair()),
     );
 
     let received_transfer = generate_tx(
@@ -354,7 +354,7 @@ fn vp_validator(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&defaults::bertha_keypair()),
+        Some(defaults::bertha_keypair()),
     );
 
     let extra_section = Section::ExtraData(Code::from_hash(vp_code_hash));
@@ -374,7 +374,7 @@ fn vp_validator(c: &mut Criterion) {
         data,
         None,
         Some(vec![extra_section]),
-        Some(&defaults::validator_keypair()),
+        Some(defaults::validator_keypair()),
     );
 
     let commission_rate = generate_tx(
@@ -385,7 +385,7 @@ fn vp_validator(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&defaults::validator_keypair()),
+        Some(defaults::validator_keypair()),
     );
 
     let vote = generate_tx(
@@ -398,7 +398,7 @@ fn vp_validator(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&defaults::validator_keypair()),
+        Some(defaults::validator_keypair()),
     );
 
     let pos = generate_tx(
@@ -410,7 +410,7 @@ fn vp_validator(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&defaults::validator_keypair()),
+        Some(defaults::validator_keypair()),
     );
 
     for (signed_tx, bench_name) in [

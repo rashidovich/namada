@@ -202,8 +202,8 @@ pub mod vp {
 
         // Verify the signatures of a tx
         pub fn namada_vp_verify_tx_section_signature(
-            hash_list_ptr: u64,
-            hash_list_len: u64,
+            hash_ptr: u64,
+            hash_len: u64,
             public_keys_map_ptr: u64,
             public_keys_map_len: u64,
             signer_ptr: u64,

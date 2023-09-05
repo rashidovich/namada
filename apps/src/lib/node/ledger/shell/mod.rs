@@ -2299,7 +2299,7 @@ mod abciplus_mempool_tests {
             // tx type declared in the header
             tx.set_data(Data::new(ext.try_to_vec().expect("Test falied")));
             tx.add_section(Section::Signature(Signature::new(
-                tx.sechashes(),
+                tx.header_hash(),
                 [(0, protocol_key)].into_iter().collect(),
                 None,
             )));
@@ -2381,7 +2381,7 @@ mod tests {
         invalid_wrapper
             .set_data(Data::new("transaction data".as_bytes().to_owned()));
         invalid_wrapper.add_section(Section::Signature(Signature::new(
-            invalid_wrapper.sechashes(),
+            invalid_wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -2448,7 +2448,7 @@ mod tests {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -2605,7 +2605,7 @@ mod tests {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -2638,7 +2638,7 @@ mod tests {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -2671,7 +2671,7 @@ mod tests {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, crate::wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
@@ -2706,7 +2706,7 @@ mod tests {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, crate::wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
@@ -2740,7 +2740,7 @@ mod tests {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, crate::wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
@@ -2774,7 +2774,7 @@ mod tests {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, crate::wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),

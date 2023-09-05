@@ -30,7 +30,7 @@ fn process_tx(c: &mut Criterion) {
         },
         None,
         None,
-        Some(&defaults::albert_keypair()),
+        Some(defaults::albert_keypair()),
     );
 
     tx.update_header(namada::types::transaction::TxType::Wrapper(Box::new(
@@ -46,7 +46,7 @@ fn process_tx(c: &mut Criterion) {
         ),
     )));
     tx.add_section(namada::proto::Section::Signature(Signature::new(
-        tx.sechashes(),
+        tx.header_hash(),
         [(0, defaults::albert_keypair())].into_iter().collect(),
         None,
     )));

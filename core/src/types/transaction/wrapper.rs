@@ -437,7 +437,7 @@ pub mod wrapper_tx {
             let mut encrypted_tx = wrapper.clone();
             encrypted_tx.encrypt(&Default::default());
             wrapper.add_section(Section::Signature(Signature::new(
-                vec![wrapper.header_hash(), wrapper.sections[0].get_hash()],
+                wrapper.header_hash(),
                 [(0, keypair)].into_iter().collect(),
                 None,
             )));
@@ -473,7 +473,7 @@ pub mod wrapper_tx {
             wrapper.set_data_sechash(Hash([0u8; 32]));
             wrapper.encrypt(&Default::default());
             wrapper.add_section(Section::Signature(Signature::new(
-                vec![wrapper.header_hash(), wrapper.sections[0].get_hash()],
+                wrapper.header_hash(),
                 [(0, keypair)].into_iter().collect(),
                 None,
             )));
@@ -506,7 +506,7 @@ pub mod wrapper_tx {
             tx.set_code(Code::new("wasm code".as_bytes().to_owned()));
             tx.set_data(Data::new("transaction data".as_bytes().to_owned()));
             tx.add_section(Section::Signature(Signature::new(
-                tx.sechashes(),
+                tx.header_hash(),
                 [(0, keypair.clone())].into_iter().collect(),
                 None,
             )));
@@ -528,7 +528,7 @@ pub mod wrapper_tx {
             assert_eq!(tx.data(), Some(malicious));
 
             // check that the signature is not valid
-            tx.verify_signature(&keypair.ref_to(), &tx.sechashes())
+            tx.verify_signature(&keypair.ref_to(), &tx.header_hash())
                 .expect_err("Test failed");
             // check that the try from method also fails
             let err = tx.validate_tx().expect_err("Test failed");

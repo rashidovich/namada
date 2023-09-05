@@ -1112,7 +1112,7 @@ mod test_prepare_proposal {
                 format!("transaction data: {}", i).as_bytes().to_owned(),
             ));
             tx.add_section(Section::Signature(Signature::new(
-                tx.sechashes(),
+                tx.header_hash(),
                 [(0, keypair.clone())].into_iter().collect(),
                 None,
             )));
@@ -1181,7 +1181,7 @@ mod test_prepare_proposal {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -1234,7 +1234,7 @@ mod test_prepare_proposal {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -1275,7 +1275,7 @@ mod test_prepare_proposal {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -1331,7 +1331,7 @@ mod test_prepare_proposal {
         wrapper.set_data(tx_data);
         let mut new_wrapper = wrapper.clone();
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -1347,7 +1347,7 @@ mod test_prepare_proposal {
             None,
         ))));
         new_wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair_2)].into_iter().collect(),
             None,
         )));
@@ -1388,7 +1388,7 @@ mod test_prepare_proposal {
         wrapper_tx
             .set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper_tx.add_section(Section::Signature(Signature::new(
-            wrapper_tx.sechashes(),
+            wrapper_tx.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -1437,7 +1437,7 @@ mod test_prepare_proposal {
         wrapper_tx
             .set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper_tx.add_section(Section::Signature(Signature::new(
-            wrapper_tx.sechashes(),
+            wrapper_tx.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -1477,7 +1477,7 @@ mod test_prepare_proposal {
         wrapper_tx
             .set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper_tx.add_section(Section::Signature(Signature::new(
-            wrapper_tx.sechashes(),
+            wrapper_tx.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -1516,7 +1516,7 @@ mod test_prepare_proposal {
         wrapper_tx
             .set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper_tx.add_section(Section::Signature(Signature::new(
-            wrapper_tx.sechashes(),
+            wrapper_tx.header_hash(),
             [(0, crate::wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
@@ -1556,7 +1556,7 @@ mod test_prepare_proposal {
         wrapper_tx
             .set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper_tx.add_section(Section::Signature(Signature::new(
-            wrapper_tx.sechashes(),
+            wrapper_tx.header_hash(),
             [(0, crate::wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
@@ -1595,7 +1595,7 @@ mod test_prepare_proposal {
         wrapper_tx
             .set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper_tx.add_section(Section::Signature(Signature::new(
-            wrapper_tx.sechashes(),
+            wrapper_tx.header_hash(),
             [(0, crate::wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
@@ -1634,7 +1634,7 @@ mod test_prepare_proposal {
         wrapper_tx
             .set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper_tx.add_section(Section::Signature(Signature::new(
-            wrapper_tx.sechashes(),
+            wrapper_tx.header_hash(),
             [(0, crate::wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),

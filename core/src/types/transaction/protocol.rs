@@ -200,7 +200,7 @@ mod protocol_txs {
             outer_tx.header.chain_id = chain_id;
             outer_tx.set_data(Data::new(tx_data));
             outer_tx.add_section(Section::Signature(Signature::new(
-                outer_tx.sechashes(),
+                outer_tx.header_hash(),
                 [(0, signing_key.clone())].into_iter().collect(),
                 None,
             )));
@@ -335,7 +335,7 @@ mod protocol_txs {
                     .expect("Serializing request should not fail"),
             ));
             outer_tx.add_section(Section::Signature(Signature::new(
-                vec![outer_tx.header_hash()],
+                outer_tx.header_hash(),
                 [(0, signing_key.clone())].into_iter().collect(),
                 None,
             )));

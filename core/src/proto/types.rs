@@ -469,7 +469,7 @@ pub enum Signer {
 )]
 pub struct Signature {
     /// The hash of the section being signed
-    pub targets: Vec<crate::types::hash::Hash>,
+    pub target: crate::types::hash::Hash,
     /// The public keys against which the signatures should be verified
     pub signer: Signer,
     /// The signature over the above hash
@@ -479,7 +479,7 @@ pub struct Signature {
 impl Signature {
     /// Sign the given section hash with the given key and return a section
     pub fn new(
-        targets: Vec<crate::types::hash::Hash>,
+        target: crate::types::hash::Hash,
         secret_keys: BTreeMap<u8, common::SecretKey>,
         signer: Option<Address>,
     ) -> Self {
@@ -499,7 +499,7 @@ impl Signature {
 
         // Commit to the given targets
         let partial = Self {
-            targets,
+            target,
             signer,
             signatures: BTreeMap::new(),
         };
@@ -610,8 +610,6 @@ impl Signature {
     Deserialize,
 )]
 pub struct CompressedSignature {
-    /// The hash of the section being signed
-    pub targets: Vec<u8>,
     /// The public keys against which the signatures should be verified
     pub signer: Signer,
     /// The signature over the above hash
@@ -623,17 +621,8 @@ impl CompressedSignature {
     /// by looking up the necessary section hashes. Used by constrained hardware
     /// wallets.
     pub fn expand(self, tx: &Tx) -> Signature {
-        let mut targets = Vec::new();
-        for idx in self.targets {
-            if idx == 0 {
-                // The "zeroth" section is the header
-                targets.push(tx.header_hash());
-            } else {
-                targets.push(tx.sections[idx as usize - 1].get_hash());
-            }
-        }
         Signature {
-            targets,
+            target: tx.header_hash(),
             signer: self.signer,
             signatures: self.signatures,
         }
@@ -1258,15 +1247,6 @@ impl Tx {
         Section::Header(raw_header).get_hash()
     }
 
-    /// Get hashes of all the sections in this transaction
-    pub fn sechashes(&self) -> Vec<crate::types::hash::Hash> {
-        let mut hashes = vec![self.header_hash()];
-        for sec in &self.sections {
-            hashes.push(sec.get_hash());
-        }
-        hashes
-    }
-
     /// Update the header whilst maintaining existing cross-references
     pub fn update_header(&mut self, tx_type: TxType) -> &mut Self {
         self.header.tx_type = tx_type;
@@ -1280,6 +1260,13 @@ impl Tx {
     ) -> Option<Cow<Section>> {
         if self.header_hash() == *hash {
             return Some(Cow::Owned(Section::Header(self.header.clone())));
+        }
+        if self.raw_header_hash() == *hash {
+            // Raw transaction header for signature verification
+            let mut raw_header = self.header();
+            raw_header.tx_type = TxType::Raw;
+
+            return Some(Cow::Owned(Section::Header(raw_header)));
         }
         for section in &self.sections {
             if section.get_hash() == *hash {
@@ -1366,25 +1353,11 @@ impl Tx {
         bytes
     }
 
-    /// Get the inner section hashes
-    pub fn inner_section_targets(&self) -> Vec<crate::types::hash::Hash> {
-        let mut sections_hashes = self
-            .sections
-            .iter()
-            .filter_map(|section| match section {
-                Section::Data(_) | Section::Code(_) => Some(section.get_hash()),
-                _ => None,
-            })
-            .collect::<Vec<crate::types::hash::Hash>>();
-        sections_hashes.sort();
-        sections_hashes
-    }
-
     /// Verify that the section with the given hash has been signed by the given
     /// public key
     pub fn verify_signatures(
         &self,
-        hashes: &[crate::types::hash::Hash],
+        hash: &crate::types::hash::Hash,
         public_keys_index_map: AccountPublicKeysMap,
         signer: &Option<Address>,
         threshold: u8,
@@ -1399,16 +1372,7 @@ impl Tx {
 
         for section in &self.sections {
             if let Section::Signature(signatures) = section {
-                // Check that the hashes being checked are a subset of those in
-                // this section. Also ensure that all the sections the signature
-                // signs over are present.
-                if hashes.iter().all(|x| {
-                    signatures.targets.contains(x) || section.get_hash() == *x
-                }) && signatures
-                    .targets
-                    .iter()
-                    .all(|x| self.get_section(x).is_some())
-                {
+                if &signatures.target == hash || &section.get_hash() == hash {
                     if signatures.total_signatures() > max_signatures {
                         return Err(Error::InvalidSectionSignature(
                             "too many signatures.".to_string(),
@@ -1458,10 +1422,10 @@ impl Tx {
     pub fn verify_signature(
         &self,
         public_key: &common::PublicKey,
-        hashes: &[crate::types::hash::Hash],
+        hash: &crate::types::hash::Hash,
     ) -> Result<&Signature> {
         self.verify_signatures(
-            hashes,
+            hash,
             AccountPublicKeysMap::from_iter([public_key.clone()].into_iter()),
             &None,
             1,
@@ -1494,11 +1458,9 @@ impl Tx {
         public_keys_index_map: &AccountPublicKeysMap,
         signer: Option<Address>,
     ) -> Vec<SignatureIndex> {
-        let mut targets = vec![self.header_hash()];
-        targets.extend(self.inner_section_targets());
         let mut signatures = Vec::new();
         let section = Signature::new(
-            targets,
+            self.header_hash(),
             public_keys_index_map.index_secret_keys(secret_keys.to_vec()),
             signer,
         );
@@ -1555,13 +1517,12 @@ impl Tx {
     /// signatures over it
     #[cfg(feature = "ferveo-tpke")]
     pub fn encrypt(&mut self, pubkey: &EncryptionKey) -> &mut Self {
-        let header_hash = self.header_hash();
+        let _header_hash = self.header_hash();
         let mut plaintexts = vec![];
         // Iterate backwrds to sidestep the effects of deletion on indexing
         for i in (0..self.sections.len()).rev() {
             match &self.sections[i] {
-                Section::Signature(sig)
-                    if sig.targets.contains(&header_hash) => {}
+                Section::Signature(_sig) => {}
                 masp_section @ Section::MaspTx(_) => {
                     // Do NOT encrypt the fee unshielding transaction
                     if let Some(unshield_section_hash) = self
@@ -1607,7 +1568,7 @@ impl Tx {
         match &self.header.tx_type {
             // verify signature and extract signed data
             TxType::Wrapper(wrapper) => self
-                .verify_signature(&wrapper.pk, &self.sechashes())
+                .verify_signature(&wrapper.pk, &self.header_hash())
                 .map(Option::Some)
                 .map_err(|err| {
                     TxError::SigError(format!(
@@ -1618,7 +1579,7 @@ impl Tx {
             // verify signature and extract signed data
             #[cfg(feature = "ferveo-tpke")]
             TxType::Protocol(protocol) => self
-                .verify_signature(&protocol.pk, &self.sechashes())
+                .verify_signature(&protocol.pk, &self.header_hash())
                 .map(Option::Some)
                 .map_err(|err| {
                     TxError::SigError(format!(
@@ -1759,7 +1720,7 @@ impl Tx {
     pub fn sign_wrapper(&mut self, keypair: common::SecretKey) -> &mut Self {
         self.protocol_filter();
         self.add_section(Section::Signature(Signature::new(
-            self.sechashes(),
+            self.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -1773,12 +1734,10 @@ impl Tx {
         account_public_keys_map: AccountPublicKeysMap,
         signer: Option<Address>,
     ) -> &mut Self {
-        // The inner tx signer signs the Raw version of the Header
-        let hashes = vec![self.raw_header_hash()];
         self.protocol_filter();
 
         self.add_section(Section::Signature(Signature::new(
-            hashes,
+            self.raw_header_hash(),
             account_public_keys_map.index_secret_keys(keypairs),
             signer,
         )));
@@ -1792,7 +1751,7 @@ impl Tx {
     ) -> &mut Self {
         self.protocol_filter();
         let mut pk_section = Signature {
-            targets: self.inner_section_targets(),
+            target: self.raw_header_hash(),
             signatures: BTreeMap::new(),
             signer: Signer::PubKeys(vec![]),
         };
@@ -1803,7 +1762,7 @@ impl Tx {
                 // Add the signature under the given multisig address
                 let section =
                     sections.entry(addr.clone()).or_insert_with(|| Signature {
-                        targets: self.inner_section_targets(),
+                        target: self.raw_header_hash(),
                         signatures: BTreeMap::new(),
                         signer: Signer::Address(addr.clone()),
                     });

@@ -202,7 +202,7 @@ impl Default for BenchShell {
             bond,
             None,
             None,
-            Some(&defaults::albert_keypair()),
+            Some(defaults::albert_keypair()),
         );
 
         let params =
@@ -231,7 +231,7 @@ impl Default for BenchShell {
             },
             None,
             Some(vec![content_section]),
-            Some(&defaults::albert_keypair()),
+            Some(defaults::albert_keypair()),
         );
 
         bench_shell.execute_tx(&signed_tx);
@@ -424,7 +424,7 @@ pub fn generate_tx(
     data: impl BorshSerialize,
     shielded: Option<Transaction>,
     extra_section: Option<Vec<Section>>,
-    signer: Option<&SecretKey>,
+    signer: Option<SecretKey>,
 ) -> Tx {
     let mut tx = Tx::from_type(namada::types::transaction::TxType::Decrypted(
         namada::types::transaction::DecryptedTx::Decrypted,
@@ -452,8 +452,8 @@ pub fn generate_tx(
 
     if let Some(signer) = signer {
         tx.add_section(Section::Signature(Signature::new(
-            tx.sechashes(),
-            [(0, signer.clone())].into_iter().collect(),
+            tx.header_hash(),
+            [(0, signer)].into_iter().collect(),
             None,
         )));
     }
@@ -495,7 +495,7 @@ pub fn generate_foreign_key_tx(signer: &SecretKey) -> Tx {
         .unwrap(),
     ));
     tx.add_section(Section::Signature(Signature::new(
-        tx.sechashes(),
+        tx.raw_header_hash(),
         [(0, signer.clone())].into_iter().collect(),
         None,
     )));
@@ -840,7 +840,7 @@ impl BenchShieldedCtx {
             },
             shielded,
             None,
-            Some(&defaults::albert_keypair()),
+            Some(defaults::albert_keypair()),
         )
     }
 }

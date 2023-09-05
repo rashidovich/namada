@@ -1088,11 +1088,13 @@ mod test_process_proposal {
                     shell.chain_id.clone(),
                 )
                 .to_bytes();
-        assert!(shell
-            .process_proposal(ProcessProposal {
-                txs: vec![tx.clone(), tx]
-            })
-            .is_err());
+        assert!(
+            shell
+                .process_proposal(ProcessProposal {
+                    txs: vec![tx.clone(), tx]
+                })
+                .is_err()
+        );
     }
 
     #[cfg(feature = "abcipp")]
@@ -1249,9 +1251,11 @@ mod test_process_proposal {
             sig,
         }
         .sign(shell.mode.get_protocol_key().expect("Test failed"));
-        let mut txs = vec![EthereumTxData::BridgePool(vote_ext.into())
-            .sign(protocol_key, shell.chain_id.clone())
-            .to_bytes()];
+        let mut txs = vec![
+            EthereumTxData::BridgePool(vote_ext.into())
+                .sign(protocol_key, shell.chain_id.clone())
+                .to_bytes(),
+        ];
 
         let event = EthereumEvent::TransfersToNamada {
             nonce: 0u64.into(),
@@ -1598,7 +1602,7 @@ mod test_process_proposal {
         outer_tx.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         outer_tx.set_data(Data::new("transaction data".as_bytes().to_owned()));
         outer_tx.add_section(Section::Signature(Signature::new(
-            outer_tx.sechashes(),
+            outer_tx.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -1670,7 +1674,7 @@ mod test_process_proposal {
         outer_tx.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         outer_tx.set_data(Data::new("transaction data".as_bytes().to_owned()));
         outer_tx.add_section(Section::Signature(Signature::new(
-            outer_tx.sechashes(),
+            outer_tx.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -1735,7 +1739,7 @@ mod test_process_proposal {
         outer_tx.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         outer_tx.set_data(Data::new("transaction data".as_bytes().to_owned()));
         outer_tx.add_section(Section::Signature(Signature::new(
-            outer_tx.sechashes(),
+            outer_tx.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -2085,7 +2089,7 @@ mod test_process_proposal {
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -2161,7 +2165,7 @@ mod test_process_proposal {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -2216,7 +2220,7 @@ mod test_process_proposal {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -2279,7 +2283,7 @@ mod test_process_proposal {
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         let mut new_wrapper = wrapper.clone();
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -2296,7 +2300,7 @@ mod test_process_proposal {
             None,
         ))));
         new_wrapper.add_section(Section::Signature(Signature::new(
-            new_wrapper.sechashes(),
+            new_wrapper.header_hash(),
             [(0, keypair_2)].into_iter().collect(),
             None,
         )));
@@ -2348,7 +2352,7 @@ mod test_process_proposal {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -2409,7 +2413,7 @@ mod test_process_proposal {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -2455,7 +2459,7 @@ mod test_process_proposal {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -2497,7 +2501,7 @@ mod test_process_proposal {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
@@ -2538,7 +2542,7 @@ mod test_process_proposal {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, crate::wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
@@ -2581,7 +2585,7 @@ mod test_process_proposal {
         wrapper.set_code(Code::new("wasm code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, crate::wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
@@ -2624,7 +2628,7 @@ mod test_process_proposal {
         wrapper.set_code(Code::new("wasm code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, crate::wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
@@ -2667,7 +2671,7 @@ mod test_process_proposal {
         wrapper.set_code(Code::new("wasm code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, crate::wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
@@ -2713,7 +2717,7 @@ mod test_process_proposal {
         wrapper.set_code(Code::new("wasm_code".as_bytes().to_owned()));
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Signature(Signature::new(
-            wrapper.sechashes(),
+            wrapper.header_hash(),
             [(0, keypair)].into_iter().collect(),
             None,
         )));
