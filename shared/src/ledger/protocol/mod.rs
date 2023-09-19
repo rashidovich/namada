@@ -217,7 +217,7 @@ where
 ///  - gas accounting
 ///
 /// Returns the set of changed storage keys.
-pub(crate) fn apply_wrapper_tx<'a, D, H, CA, WLS>(
+pub fn apply_wrapper_tx<'a, D, H, CA, WLS>(
     wrapper: &WrapperTx,
     fee_unshield_transaction: Option<Transaction>,
     tx_bytes: &[u8],
@@ -293,7 +293,7 @@ pub fn get_fee_unshielding_transaction(
 /// - Fee amount overflows
 /// - Not enough funds are available to pay the entire amount of the fee
 /// - The accumulated fee amount to be credited to the block proposer overflows
-pub fn charge_fee<'a, D, H, CA, WLS>(
+fn charge_fee<'a, D, H, CA, WLS>(
     wrapper: &WrapperTx,
     masp_transaction: Option<Transaction>,
     shell_params: &mut ShellParams<'a, CA, WLS>,
