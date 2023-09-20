@@ -188,6 +188,7 @@ pub fn vp<DB, H, CA>(
     storage: &Storage<DB, H>,
     write_log: &WriteLog,
     gas_meter: &mut VpGasMeter,
+    invalid_sig: &mut bool,
     keys_changed: &BTreeSet<Key>,
     verifiers: &BTreeSet<Address>,
     mut vp_wasm_cache: VpCache<CA>,
@@ -220,6 +221,7 @@ where
         storage,
         write_log,
         gas_meter,
+        invalid_sig,
         tx,
         tx_index,
         &mut iterators,
@@ -690,6 +692,7 @@ mod tests {
         let mut gas_meter = VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new_from_sub_limit(TX_GAS_LIMIT.into()),
         );
+        let mut invalid_sig = false;
         let keys_changed = BTreeSet::new();
         let verifiers = BTreeSet::new();
         let tx_index = TxIndex::default();
@@ -742,6 +745,7 @@ mod tests {
             &storage,
             &write_log,
             &mut gas_meter,
+            &mut invalid_sig,
             &keys_changed,
             &verifiers,
             vp_cache.clone(),
@@ -774,6 +778,7 @@ mod tests {
             &storage,
             &write_log,
             &mut gas_meter,
+            &mut invalid_sig,
             &keys_changed,
             &verifiers,
             vp_cache,
@@ -793,6 +798,7 @@ mod tests {
         let mut gas_meter = VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new_from_sub_limit(TX_GAS_LIMIT.into()),
         );
+        let mut invalid_sig = false;
         let keys_changed = BTreeSet::new();
         let verifiers = BTreeSet::new();
         let tx_index = TxIndex::default();
@@ -826,6 +832,7 @@ mod tests {
             &storage,
             &write_log,
             &mut gas_meter,
+            &mut invalid_sig,
             &keys_changed,
             &verifiers,
             vp_cache.clone(),
@@ -846,6 +853,7 @@ mod tests {
             &storage,
             &write_log,
             &mut gas_meter,
+            &mut invalid_sig,
             &keys_changed,
             &verifiers,
             vp_cache,
@@ -925,6 +933,7 @@ mod tests {
         let mut gas_meter = VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new_from_sub_limit(TX_GAS_LIMIT.into()),
         );
+        let mut invalid_sig = false;
         let keys_changed = BTreeSet::new();
         let verifiers = BTreeSet::new();
         let tx_index = TxIndex::default();
@@ -958,6 +967,7 @@ mod tests {
             &storage,
             &write_log,
             &mut gas_meter,
+            &mut invalid_sig,
             &keys_changed,
             &verifiers,
             vp_cache,
@@ -1046,6 +1056,7 @@ mod tests {
         let mut gas_meter = VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new_from_sub_limit(TX_GAS_LIMIT.into()),
         );
+        let mut invalid_sig = false;
         let keys_changed = BTreeSet::new();
         let verifiers = BTreeSet::new();
         let tx_index = TxIndex::default();
@@ -1084,6 +1095,7 @@ mod tests {
             &storage,
             &write_log,
             &mut gas_meter,
+            &mut invalid_sig,
             &keys_changed,
             &verifiers,
             vp_cache,
@@ -1105,6 +1117,7 @@ mod tests {
         let mut gas_meter = VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new_from_sub_limit(TX_GAS_LIMIT.into()),
         );
+        let mut invalid_sig = false;
         let keys_changed = BTreeSet::new();
         let verifiers = BTreeSet::new();
         let tx_index = TxIndex::default();
@@ -1161,6 +1174,7 @@ mod tests {
             &storage,
             &write_log,
             &mut gas_meter,
+            &mut invalid_sig,
             &keys_changed,
             &verifiers,
             vp_cache,
@@ -1274,6 +1288,7 @@ mod tests {
         let mut gas_meter = VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new_from_sub_limit(TX_GAS_LIMIT.into()),
         );
+        let mut invalid_sig = false;
         let keys_changed = BTreeSet::new();
         let verifiers = BTreeSet::new();
         let (vp_cache, _) = wasm::compilation_cache::common::testing::cache();
@@ -1293,6 +1308,7 @@ mod tests {
             &storage,
             &write_log,
             &mut gas_meter,
+            &mut invalid_sig,
             &keys_changed,
             &verifiers,
             vp_cache,

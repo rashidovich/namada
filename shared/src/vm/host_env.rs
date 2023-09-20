@@ -253,6 +253,8 @@ where
     pub iterators: MutHostRef<'a, &'a PrefixIterators<'a, DB>>,
     /// VP gas meter.
     pub gas_meter: MutHostRef<'a, &'a VpGasMeter>,
+    /// Invalid signature flag
+    pub invalid_sig: MutHostRef<'a, &'a bool>,
     /// The transaction code is used for signature verification
     pub tx: HostRef<'a, &'a Tx>,
     /// The transaction index is used to identify a shielded transaction's
@@ -321,6 +323,7 @@ where
         storage: &Storage<DB, H>,
         write_log: &WriteLog,
         gas_meter: &mut VpGasMeter,
+        invalid_sig: &mut bool,
         tx: &Tx,
         tx_index: &TxIndex,
         iterators: &mut PrefixIterators<'a, DB>,
@@ -335,6 +338,7 @@ where
             storage,
             write_log,
             gas_meter,
+            invalid_sig,
             tx,
             tx_index,
             iterators,
@@ -386,6 +390,7 @@ where
         storage: &Storage<DB, H>,
         write_log: &WriteLog,
         gas_meter: &mut VpGasMeter,
+        invalid_sig: &mut bool,
         tx: &Tx,
         tx_index: &TxIndex,
         iterators: &mut PrefixIterators<'a, DB>,
@@ -402,6 +407,7 @@ where
         let tx_index = unsafe { HostRef::new(tx_index) };
         let iterators = unsafe { MutHostRef::new(iterators) };
         let gas_meter = unsafe { MutHostRef::new(gas_meter) };
+        let invalid_sig = unsafe { MutHostRef::new(invalid_sig) };
         let verifiers = unsafe { HostRef::new(verifiers) };
         let result_buffer = unsafe { MutHostRef::new(result_buffer) };
         let keys_changed = unsafe { HostRef::new(keys_changed) };
@@ -414,6 +420,7 @@ where
             write_log,
             iterators,
             gas_meter,
+            invalid_sig,
             tx,
             tx_index,
             eval_runner,
@@ -442,6 +449,7 @@ where
             write_log: self.write_log.clone(),
             iterators: self.iterators.clone(),
             gas_meter: self.gas_meter.clone(),
+            invalid_sig: self.invalid_sig.clone(),
             tx: self.tx.clone(),
             tx_index: self.tx_index.clone(),
             eval_runner: self.eval_runner.clone(),
@@ -1841,8 +1849,8 @@ where
 
     let tx = unsafe { env.ctx.tx.get() };
 
-    Ok(HostEnvResult::from(
-        tx.verify_signatures(
+    let is_valid_sig = tx
+        .verify_signatures(
             &hashes,
             public_keys_map,
             &Some(signer),
@@ -1850,9 +1858,15 @@ where
             max_signatures,
             Some(gas_meter),
         )
-        .is_ok(),
-    )
-    .to_i64())
+        .is_ok();
+
+    if !is_valid_sig {
+        unsafe {
+            *env.ctx.invalid_sig.get() = true;
+        }
+    }
+
+    Ok(HostEnvResult::from(is_valid_sig).to_i64())
 }
 
 /// Verify a ShieldedTransaction.
@@ -2460,6 +2474,7 @@ pub mod testing {
         write_log: &WriteLog,
         iterators: &mut PrefixIterators<'static, DB>,
         gas_meter: &mut VpGasMeter,
+        invalid_sig: &mut bool,
         tx: &Tx,
         tx_index: &TxIndex,
         verifiers: &BTreeSet<Address>,
@@ -2480,6 +2495,7 @@ pub mod testing {
             storage,
             write_log,
             gas_meter,
+            invalid_sig,
             tx,
             tx_index,
             iterators,
