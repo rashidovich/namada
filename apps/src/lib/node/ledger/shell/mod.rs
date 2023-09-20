@@ -1418,6 +1418,7 @@ where
             match apply_wasm_tx(
                 unshield,
                 &TxIndex::default(),
+                &mut false,
                 ShellParams::new(
                     &mut TxGasMeter::new(fee_unshielding_gas_limit),
                     temp_wl_storage,

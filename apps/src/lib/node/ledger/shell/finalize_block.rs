@@ -429,6 +429,8 @@ where
                     },
                 };
 
+            let mut invalid_sig_sentinel = false;
+
             match protocol::dispatch_tx(
                 tx,
                 processed_tx.tx.as_ref(),
@@ -438,6 +440,7 @@ where
                         .expect("transaction index out of bounds"),
                 ),
                 &mut tx_gas_meter,
+                &mut invalid_sig_sentinel,
                 &mut self.wl_storage,
                 &mut self.vp_wasm_cache,
                 &mut self.tx_wasm_cache,
@@ -506,7 +509,7 @@ where
                         );
 
                         if let Some(hash) = decrypted_tx_hash {
-                            if result.vps_result.invalid_sig {
+                            if invalid_sig_sentinel {
                                 // Invalid signature was found, remove the tx
                                 // hash from storage to allow replay
                                 let tx_hash_key =
@@ -533,23 +536,20 @@ where
                         tx_event["hash"],
                         msg
                     );
-                    stats.increment_errored_txs();
 
-                    self.wl_storage.drop_tx();
-                    // FIXME: should check the invalid sig also here? Probably
-                    // yes, if the signature is invalid the hash should not be
-                    // stored regardless of the reason of the crash
-                    // FIXME: so I need to notify the invalid sig in some way
-                    // even i ncase of a failure, maybe I should put the flag
-                    // somewhere else FIXME: there's a
-                    // problem. At the moment an error inone VP short circuits
-                    // the evaluation, but I cannot do that anymore, I need to
-                    // run all of the vps to see if there's an invalid signature
-                    // FIXME: but in theory I can't run the VPs if I'm going out
-                    // of gas, so it seems like if I go out of gas I can short
-                    // circuit (which causes the removal of the hash any way),
-                    // if the error is because of something else I do NOT
-                    // short-sircuit
+                    if let Some(hash) = decrypted_tx_hash {
+                        if invalid_sig_sentinel {
+                            // Invalid signature was found, remove the tx
+                            // hash from storage to allow replay
+                            let tx_hash_key =
+                                replay_protection::get_replay_protection_key(
+                                    &hash,
+                                );
+                            self.wl_storage.delete(&tx_hash_key).expect(
+                                "Error while deleting tx hash key from storage",
+                            );
+                        }
+                    }
 
                     // If transaction type is Decrypted and failed because of
                     // out of gas, remove its hash from storage to allow
@@ -567,6 +567,9 @@ where
                             );
                         }
                     }
+
+                    stats.increment_errored_txs();
+                    self.wl_storage.drop_tx();
 
                     tx_event["gas_used"] =
                         tx_gas_meter.get_tx_consumed_gas().to_string();
