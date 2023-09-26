@@ -30,13 +30,13 @@ use crate::ledger::queries::RPC;
 use crate::proto::Tx;
 use crate::sdk::args::InputAmount;
 use crate::sdk::error;
-use crate::sdk::error::{EncodingError, Error, QueryError};
+use crate::sdk::error::{EncodingError, Error, QueryError, TxError};
 use crate::tendermint::block::Height;
 use crate::tendermint::merkle::proof::Proof;
 use crate::tendermint_rpc::error::Error as TError;
 use crate::tendermint_rpc::query::Query;
 use crate::tendermint_rpc::Order;
-use crate::types::control_flow::{time, Halt, TryHalt};
+use crate::types::control_flow::time;
 use crate::types::hash::Hash;
 use crate::types::io::Io;
 use crate::types::key::common;
@@ -52,7 +52,7 @@ pub async fn query_tx_status<C, IO: Io>(
     client: &C,
     status: TxEventQuery<'_>,
     deadline: time::Instant,
-) -> Halt<Event>
+) -> Result<Event, Error>
 where
     C: crate::ledger::queries::Client + Sync,
 {
@@ -88,11 +88,15 @@ where
         }
     })
     .await
-    .try_halt(|_| {
+    .map_err(|_| {
         edisplay_line!(
             IO,
             "Transaction status query deadline of {deadline:?} exceeded"
         );
+        match status {
+            TxEventQuery::Accepted(_) => Error::Tx(TxError::AcceptTimeout),
+            TxEventQuery::Applied(_) => Error::Tx(TxError::AppliedTimeout),
+        }
     })
 }
 
@@ -1001,7 +1005,9 @@ pub async fn validate_amount<
 }
 
 /// Wait for a first block and node to be synced.
-pub async fn wait_until_node_is_synched<C, IO: Io>(client: &C) -> Halt<()>
+pub async fn wait_until_node_is_synched<C, IO: Io>(
+    client: &C,
+) -> Result<(), Error>
 where
     C: crate::ledger::queries::Client + Sync,
 {
@@ -1040,25 +1046,22 @@ where
                 ControlFlow::Continue(())
             }
             Err(e) => {
-                edisplay_line!(
-                    IO,
-                    "Failed to query node status with error: {}",
-                    e
-                );
-                ControlFlow::Break(Err(()))
+                let msg =
+                    format!("Failed to query node status with error: {e}");
+                edisplay_line!(IO, "{msg}");
+                ControlFlow::Break(Err(Error::Query(QueryError::General(msg))))
             }
         }
     })
     .await
     // maybe time out
-    .try_halt(|_| {
+    .map_err(|_| {
         display_line!(
             IO,
             "Node is still catching up, wait for it to finish synching."
         );
+        Error::Query(QueryError::CatchingUp)
     })?
-    // error querying rpc
-    .try_halt(|_| ())
 }
 
 /// Look up the denomination of a token in order to format it

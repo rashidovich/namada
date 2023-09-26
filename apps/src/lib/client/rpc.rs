@@ -45,7 +45,6 @@ use namada::sdk::rpc::{
 };
 use namada::sdk::wallet::{AddressVpType, Wallet};
 use namada::types::address::{masp, Address};
-use namada::types::control_flow::ProceedOrElse;
 use namada::types::hash::Hash;
 use namada::types::io::Io;
 use namada::types::key::*;
@@ -75,7 +74,7 @@ pub async fn query_tx_status<
 ) -> Event {
     rpc::query_tx_status::<_, IO>(client, status, deadline)
         .await
-        .proceed()
+        .unwrap()
 }
 
 /// Query and print the epoch of the last committed block

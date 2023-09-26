@@ -1,6 +1,5 @@
 //! Validator set updates SDK functionality.
 
-use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::future::Future;
 use std::pin::Pin;
@@ -13,6 +12,8 @@ use ethers::providers::Middleware;
 use futures::future::{self, FutureExt};
 use namada_core::hints;
 use namada_core::types::storage::Epoch;
+use namada_core::types::vote_extensions::validator_set_update::VotingPowersMap;
+use namada_ethereum_bridge::storage::proof::EthereumProof;
 
 use super::{block_on_eth_sync, eth_sync_or, eth_sync_or_exit, BlockOnEthSync};
 use crate::eth_bridge::ethers::abi::{AbiDecode, AbiType, Tokenizable};
@@ -20,11 +21,11 @@ use crate::eth_bridge::ethers::core::types::TransactionReceipt;
 use crate::eth_bridge::structs::Signature;
 use crate::ledger::queries::RPC;
 use crate::sdk::args;
+use crate::sdk::error::{Error as SdkError, EthereumBridgeError, QueryError};
 use crate::sdk::queries::Client;
+use crate::types::control_flow::install_shutdown_signal;
 use crate::types::control_flow::time::{self, Duration, Instant};
-use crate::types::control_flow::{
-    self, install_shutdown_signal, Halt, TryHalt,
-};
+use crate::types::eth_abi::EncodeCell;
 use crate::types::ethereum_events::EthAddress;
 use crate::types::io::{DefaultIo, Io};
 use crate::types::vote_extensions::validator_set_update::ValidatorSetArgs;
@@ -43,7 +44,7 @@ enum Error {
     /// `tracing` log level.
     WithReason {
         /// The reason of the error.
-        reason: Cow<'static, str>,
+        reason: SdkError,
         /// The log level where to display the error message.
         level: tracing::Level,
         /// If critical, exit the relayer.
@@ -57,7 +58,7 @@ impl Error {
     /// The error is recoverable.
     fn recoverable<M>(msg: M) -> Self
     where
-        M: Into<Cow<'static, str>>,
+        M: Into<SdkError>,
     {
         Error::WithReason {
             level: tracing::Level::DEBUG,
@@ -71,7 +72,7 @@ impl Error {
     /// The error is not recoverable.
     fn critical<M>(msg: M) -> Self
     where
-        M: Into<Cow<'static, str>>,
+        M: Into<SdkError>,
     {
         Error::WithReason {
             level: tracing::Level::ERROR,
@@ -80,9 +81,10 @@ impl Error {
         }
     }
 
-    /// Display the error message, and return the [`Halt`] status.
-    fn handle(&self) -> Halt<()> {
-        let critical = match self {
+    /// Display the error message, and return a new [`Result`],
+    /// with the error already handled appropriately.
+    fn handle(self) -> Result<(), SdkError> {
+        let (critical, reason) = match self {
             Error::WithReason {
                 reason,
                 critical,
@@ -93,7 +95,7 @@ impl Error {
                     %reason,
                     "An error occurred during the relay"
                 );
-                *critical
+                (critical, reason)
             }
             Error::WithReason {
                 reason,
@@ -104,18 +106,18 @@ impl Error {
                     %reason,
                     "An error occurred during the relay"
                 );
-                *critical
+                (critical, reason)
             }
             // all log levels we care about are DEBUG and ERROR
             _ => {
                 hints::cold();
-                return control_flow::proceed(());
+                return Ok(());
             }
         };
         if hints::unlikely(critical) {
-            control_flow::halt()
+            Err(reason)
         } else {
-            control_flow::proceed(())
+            Ok(())
         }
     }
 }
@@ -172,7 +174,7 @@ trait ShouldRelay {
         E::Error: std::fmt::Display;
 
     /// Try to recover from an error that has happened.
-    fn try_recover(err: String) -> Error;
+    fn try_recover<E: Into<SdkError>>(err: E) -> Error;
 }
 
 impl ShouldRelay for DoNotCheckNonce {
@@ -189,7 +191,7 @@ impl ShouldRelay for DoNotCheckNonce {
     }
 
     #[inline]
-    fn try_recover(err: String) -> Error {
+    fn try_recover<E: Into<SdkError>>(err: E) -> Error {
         Error::recoverable(err)
     }
 }
@@ -228,7 +230,7 @@ impl ShouldRelay for CheckNonce {
     }
 
     #[inline]
-    fn try_recover(err: String) -> Error {
+    fn try_recover<E: Into<SdkError>>(err: E) -> Error {
         Error::critical(err)
     }
 }
@@ -271,7 +273,8 @@ impl From<Option<TransactionReceipt>> for RelayResult {
 pub async fn query_validator_set_update_proof<C, IO: Io>(
     client: &C,
     args: args::ValidatorSetProof,
-) where
+) -> Result<EncodeCell<EthereumProof<(Epoch, VotingPowersMap)>>, SdkError>
+where
     C: Client + Sync,
 {
     let epoch = if let Some(epoch) = args.epoch {
@@ -285,16 +288,22 @@ pub async fn query_validator_set_update_proof<C, IO: Io>(
         .eth_bridge()
         .read_valset_upd_proof(client, &epoch)
         .await
-        .unwrap();
+        .map_err(|err| {
+            let msg =
+                format!("Failed to fetch validator set update proof: {err}");
+            edisplay_line!(IO, "{msg}");
+            SdkError::Query(QueryError::General(msg))
+        })?;
 
     display_line!(IO, "0x{}", HEXLOWER.encode(encoded_proof.as_ref()));
+    Ok(encoded_proof)
 }
 
 /// Query an ABI encoding of the Bridge validator set at a given epoch.
 pub async fn query_bridge_validator_set<C, IO: Io>(
     client: &C,
     args: args::BridgeValidatorSet,
-) -> Halt<()>
+) -> Result<ValidatorSetArgs, SdkError>
 where
     C: Client + Sync,
 {
@@ -309,19 +318,21 @@ where
         .eth_bridge()
         .read_bridge_valset(client, &epoch)
         .await
-        .try_halt(|err| {
-            tracing::error!(%err, "Failed to fetch Bridge validator set");
+        .map_err(|err| {
+            let msg = format!("Failed to fetch Bridge validator set: {err}");
+            edisplay_line!(IO, "{msg}");
+            SdkError::Query(QueryError::General(msg))
         })?;
 
-    display_validator_set::<IO>(args);
-    control_flow::proceed(())
+    display_validator_set::<IO>(args.clone());
+    Ok(args)
 }
 
 /// Query an ABI encoding of the Governance validator set at a given epoch.
 pub async fn query_governnace_validator_set<C, IO: Io>(
     client: &C,
     args: args::GovernanceValidatorSet,
-) -> Halt<()>
+) -> Result<ValidatorSetArgs, SdkError>
 where
     C: Client + Sync,
 {
@@ -336,12 +347,15 @@ where
         .eth_bridge()
         .read_governance_valset(client, &epoch)
         .await
-        .try_halt(|err| {
-            tracing::error!(%err, "Failed to fetch Governance validator set");
+        .map_err(|err| {
+            let msg =
+                format!("Failed to fetch Governance validator set: {err}");
+            edisplay_line!(IO, "{msg}");
+            SdkError::Query(QueryError::General(msg))
         })?;
 
-    display_validator_set::<IO>(args);
-    control_flow::proceed(())
+    display_validator_set::<IO>(args.clone());
+    Ok(args)
 }
 
 /// Display the given [`ValidatorSetArgs`].
@@ -384,7 +398,7 @@ pub async fn relay_validator_set_update<C, E, IO: Io>(
     eth_client: Arc<E>,
     nam_client: &C,
     args: args::ValidatorSetUpdateRelay,
-) -> Halt<()>
+) -> Result<(), SdkError>
 where
     C: Client + Sync,
     E: Middleware,
@@ -461,8 +475,8 @@ where
             },
         )
         .await
-        .try_halt_or_recover(|error| error.handle())
     }
+    .or_else(|err| err.handle())
 }
 
 async fn relay_validator_set_update_daemon<C, E, F>(
@@ -470,7 +484,7 @@ async fn relay_validator_set_update_daemon<C, E, F>(
     eth_client: Arc<E>,
     nam_client: &C,
     shutdown_receiver: &mut Option<F>,
-) -> Halt<()>
+) -> Result<(), Error>
 where
     C: Client + Sync,
     E: Middleware,
@@ -500,7 +514,7 @@ where
         };
 
         if should_exit {
-            return control_flow::proceed(());
+            return Ok(());
         }
 
         let sleep_for = if last_call_succeeded {
@@ -515,7 +529,7 @@ where
         let is_synchronizing =
             eth_sync_or::<_, _, _, DefaultIo>(&*eth_client, || ())
                 .await
-                .is_break();
+                .is_err();
         if is_synchronizing {
             tracing::debug!("The Ethereum node is synchronizing");
             last_call_succeeded = false;
@@ -525,20 +539,17 @@ where
         // we could be racing against governance updates,
         // so it is best to always fetch the latest Bridge
         // contract address
-        let bridge = get_bridge_contract(nam_client, Arc::clone(&eth_client))
-            .await
-            .try_halt(|err| {
-                // only care about displaying errors,
-                // exit on all circumstances
-                _ = err.handle();
-            })?;
+        let bridge =
+            get_bridge_contract(nam_client, Arc::clone(&eth_client)).await?;
         let bridge_epoch_prep_call = bridge.validator_set_nonce();
         let bridge_epoch_fut = bridge_epoch_prep_call.call().map(|result| {
             result
                 .map_err(|err| {
-                    tracing::error!(
+                    let msg = format!(
                         "Failed to fetch latest validator set nonce: {err}"
                     );
+                    tracing::error!("{msg}");
+                    Error::critical(QueryError::General(msg))
                 })
                 .map(|e| e.as_u64() as i128)
         });
@@ -547,16 +558,17 @@ where
         let nam_current_epoch_fut = shell.epoch(nam_client).map(|result| {
             result
                 .map_err(|err| {
-                    tracing::error!(
+                    let msg = format!(
                         "Failed to fetch the latest epoch in Namada: {err}"
                     );
+                    tracing::error!("{msg}");
+                    Error::critical(QueryError::General(msg))
                 })
                 .map(|Epoch(e)| e as i128)
         });
 
         let (nam_current_epoch, gov_current_epoch) =
-            futures::try_join!(nam_current_epoch_fut, bridge_epoch_fut)
-                .try_halt(|()| ())?;
+            futures::try_join!(nam_current_epoch_fut, bridge_epoch_fut)?;
 
         tracing::debug!(
             ?nam_current_epoch,
@@ -634,7 +646,11 @@ where
         .eth_bridge()
         .read_bridge_contract(nam_client)
         .await
-        .map_err(|err| Error::critical(err.to_string()))?;
+        .map_err(|err| {
+            Error::critical(EthereumBridgeError::RetrieveContract(
+                err.to_string(),
+            ))
+        })?;
     Ok(Bridge::new(bridge_contract.address, eth_client))
 }
 
@@ -657,27 +673,49 @@ where
         RPC.shell()
             .epoch(nam_client)
             .await
-            .map_err(|e| Error::critical(e.to_string()))?
+            .map_err(|e| Error::critical(QueryError::General(e.to_string())))?
             .next()
     };
 
     if hints::unlikely(epoch_to_relay == Epoch(0)) {
-        return Err(Error::critical(
-            "There is no validator set update proof for epoch 0",
-        ));
+        return Err(Error::critical(SdkError::Other(
+            "There is no validator set update proof for epoch 0".into(),
+        )));
     }
 
     let shell = RPC.shell().eth_bridge();
-    let encoded_proof_fut =
-        shell.read_valset_upd_proof(nam_client, &epoch_to_relay);
+    let encoded_proof_fut = shell
+        .read_valset_upd_proof(nam_client, &epoch_to_relay)
+        .map(|result| {
+            result.map_err(|err| {
+                let msg = format!(
+                    "Failed to fetch validator set update proof: {err}"
+                );
+                SdkError::Query(QueryError::General(msg))
+            })
+        });
 
     let bridge_current_epoch = epoch_to_relay - 1;
     let shell = RPC.shell().eth_bridge();
-    let validator_set_args_fut =
-        shell.read_bridge_valset(nam_client, &bridge_current_epoch);
+    let validator_set_args_fut = shell
+        .read_bridge_valset(nam_client, &bridge_current_epoch)
+        .map(|result| {
+            result.map_err(|err| {
+                let msg =
+                    format!("Failed to fetch Bridge validator set: {err}");
+                SdkError::Query(QueryError::General(msg))
+            })
+        });
 
     let shell = RPC.shell().eth_bridge();
-    let bridge_address_fut = shell.read_bridge_contract(nam_client);
+    let bridge_address_fut =
+        shell.read_bridge_contract(nam_client).map(|result| {
+            result.map_err(|err| {
+                SdkError::EthereumBridge(EthereumBridgeError::RetrieveContract(
+                    err.to_string(),
+                ))
+            })
+        });
 
     let (encoded_proof, validator_set_args, bridge_contract) =
         futures::try_join!(
@@ -685,7 +723,7 @@ where
             validator_set_args_fut,
             bridge_address_fut
         )
-        .map_err(|err| R::try_recover(err.to_string()))?;
+        .map_err(|err| R::try_recover(err))?;
 
     let (bridge_hash, gov_hash, signatures): (
         [u8; 32],
@@ -716,14 +754,15 @@ where
         relay_op.tx.set_from(eth_addr.into());
     }
 
-    let pending_tx = relay_op
-        .send()
-        .await
-        .map_err(|e| Error::critical(e.to_string()))?;
+    let pending_tx = relay_op.send().await.map_err(|e| {
+        Error::critical(EthereumBridgeError::ContractCall(e.to_string()))
+    })?;
     let transf_result = pending_tx
         .confirmations(args.confirmations as usize)
         .await
-        .map_err(|err| Error::critical(err.to_string()))?;
+        .map_err(|e| {
+            Error::critical(EthereumBridgeError::Rpc(e.to_string()))
+        })?;
 
     let transf_result: R::RelayResult = transf_result.into();
     let status = if transf_result.is_successful() {

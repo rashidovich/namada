@@ -55,7 +55,7 @@ use crate::sdk::signing::{self, TxSourcePostBalance};
 use crate::sdk::wallet::{Wallet, WalletUtils};
 use crate::tendermint_rpc::endpoint::broadcast::tx_sync::Response;
 use crate::tendermint_rpc::error::Error as RpcError;
-use crate::types::control_flow::{time, ProceedOrElse};
+use crate::types::control_flow::time;
 use crate::types::io::Io;
 use crate::types::key::*;
 use crate::types::masp::TransferTarget;
@@ -393,8 +393,7 @@ where
         let wrapper_query = rpc::TxEventQuery::Accepted(wrapper_hash.as_str());
         let event =
             rpc::query_tx_status::<_, IO>(client, wrapper_query, deadline)
-                .await
-                .proceed_or(TxError::AcceptTimeout)?;
+                .await?;
         let parsed = TxResponse::from_event(event);
         let tx_to_str = |parsed| {
             serde_json::to_string_pretty(parsed).map_err(|err| {
@@ -418,8 +417,7 @@ where
                 decrypted_query,
                 deadline,
             )
-            .await
-            .proceed_or(TxError::AppliedTimeout)?;
+            .await?;
             let parsed = TxResponse::from_event(event);
             display_line!(
                 IO,
