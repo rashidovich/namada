@@ -4445,12 +4445,6 @@ where
             r#type: enqueued_slash.r#type,
             rate: slash_rate,
         };
-        tracing::debug!(
-            "Slash for validator {} committed in epoch {} has rate {}",
-            &validator,
-            enqueued_slash.epoch,
-            slash_rate
-        );
 
         let cur_slashes = eager_validator_slashes
             .entry(validator.clone())
@@ -5740,10 +5734,19 @@ where
         tracing::debug!("\nRedeleg dest bonds before incrementing: {bonds:#?}");
     }
 
-    // `updatedDelegator` with updates to `bonded`
-    let bond_handle = bond_handle(delegator, dest_validator);
     if !amount_after_slashing.is_zero() {
+        // `updatedDelegator` with updates to `bonded`
+        let bond_handle = bond_handle(delegator, dest_validator);
         bond_handle.add(
+            storage,
+            amount_after_slashing,
+            current_epoch,
+            params.pipeline_len,
+        )?;
+        // `updatedDestValidator` --> `with("totalVBonded")`
+        // Add the amount to the dest validator total bonded
+        let dest_total_bonded = total_bonded_handle(dest_validator);
+        dest_total_bonded.add(
             storage,
             amount_after_slashing,
             current_epoch,
@@ -5769,15 +5772,6 @@ where
         )?;
     }
 
-    // `updatedDestValidator`
-    // Add the amount to the dest validator total bonded
-    let dest_total_bonded = total_bonded_handle(dest_validator);
-    dest_total_bonded.add(
-        storage,
-        amount_after_slashing,
-        current_epoch,
-        params.pipeline_len,
-    )?;
     // Add the amount to the dest validator total redelegated bonds.
     let dest_total_redelegated_bonded =
         validator_total_redelegated_bonded_handle(dest_validator)
