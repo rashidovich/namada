@@ -16,7 +16,7 @@ use namada_core::types::transaction::WrapperTx;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use thiserror::Error;
 
-use crate::ledger::gas::{self, GasMetering, VpGasMeter};
+use crate::ledger::gas::{GasMetering, VpGasMeter};
 use crate::ledger::governance::GovernanceVp;
 use crate::ledger::native_vp::ethereum_bridge::bridge_pool_vp::BridgePoolVp;
 use crate::ledger::native_vp::ethereum_bridge::nut::NonUsableTokens;
@@ -57,10 +57,12 @@ pub enum Error {
     TxTypeError,
     #[error("Fee ushielding error: {0}")]
     FeeUnshieldingError(crate::types::transaction::WrapperTxErr),
-    #[error("{0}")]
-    GasError(#[from] gas::Error),
+    #[error("Gas error: {0}")]
+    GasError(String),
     #[error("Error while processing transaction's fees: {0}")]
     FeeError(String),
+    #[error("Invalid transaction signature: {0}")]
+    InvalidTxSignature(String),
     #[error("Error executing VP for addresses: {0:?}")]
     VpRunnerError(vm::wasm::run::Error),
     #[error("The address {0} doesn't exist")]
@@ -143,7 +145,6 @@ pub fn dispatch_tx<'a, D, H, CA>(
     tx_bytes: &'a [u8],
     tx_index: TxIndex,
     tx_gas_meter: &'a mut TxGasMeter,
-    invalid_sig_sentinel: &'a mut bool,
     wl_storage: &'a mut WlStorage<D, H>,
     vp_wasm_cache: &'a mut VpCache<CA>,
     tx_wasm_cache: &'a mut TxCache<CA>,
@@ -159,7 +160,6 @@ where
         TxType::Decrypted(DecryptedTx::Decrypted) => apply_wasm_tx(
             tx,
             &tx_index,
-            invalid_sig_sentinel,
             ShellParams {
                 tx_gas_meter,
                 wl_storage,
@@ -256,7 +256,10 @@ where
     )?;
 
     // Account for gas
-    shell_params.tx_gas_meter.add_tx_size_gas(tx_bytes)?;
+    shell_params
+        .tx_gas_meter
+        .add_tx_size_gas(tx_bytes)
+        .map_err(|err| Error::GasError(err.to_string()))?;
 
     // If wrapper was succesful, write inner tx hash to storage
     let inner_hash_key = replay_protection::get_replay_protection_key(
@@ -345,7 +348,6 @@ where
                 match apply_wasm_tx(
                     fee_unshielding_tx,
                     &TxIndex::default(),
-                    &mut false,
                     ShellParams {
                         tx_gas_meter: &mut tx_gas_meter,
                         wl_storage: *wl_storage,
@@ -563,7 +565,6 @@ where
 pub fn apply_wasm_tx<'a, D, H, CA, WLS>(
     tx: Tx,
     tx_index: &TxIndex,
-    invalid_sig_sentinel: &mut bool,
     shell_params: ShellParams<'a, CA, WLS>,
 ) -> Result<TxResult>
 where
@@ -605,7 +606,6 @@ where
         tx_index,
         storage,
         tx_gas_meter,
-        invalid_sig_sentinel,
         write_log,
         verifiers_from_tx: &verifiers,
         vp_wasm_cache,
@@ -726,12 +726,9 @@ where
         vp_wasm_cache,
         tx_wasm_cache,
     )
-    .map_err(|e| {
-        if let wasm::run::Error::GasError(gas_error) = e {
-            Error::GasError(gas_error)
-        } else {
-            Error::TxRunnerError(e)
-        }
+    .map_err(|err| match err {
+        wasm::run::Error::GasError(msg) => Error::GasError(msg),
+        _ => Error::TxRunnerError(err),
     })
 }
 
@@ -746,7 +743,6 @@ where
     tx_index: &'a TxIndex,
     storage: &'a Storage<D, H>,
     tx_gas_meter: &'a mut TxGasMeter,
-    invalid_sig_sentinel: &'a mut bool,
     write_log: &'a WriteLog,
     verifiers_from_tx: &'a BTreeSet<Address>,
     vp_wasm_cache: &'a mut VpCache<CA>,
@@ -759,7 +755,6 @@ fn check_vps<D, H, CA>(
         tx_index,
         storage,
         tx_gas_meter,
-        invalid_sig_sentinel,
         write_log,
         verifiers_from_tx,
         vp_wasm_cache,
@@ -781,12 +776,13 @@ where
         storage,
         write_log,
         tx_gas_meter,
-        invalid_sig_sentinel,
         vp_wasm_cache,
     )?;
     tracing::debug!("Total VPs gas cost {:?}", vps_result.gas_used);
 
-    tx_gas_meter.add_vps_gas(&vps_result.gas_used)?;
+    tx_gas_meter
+        .add_vps_gas(&vps_result.gas_used)
+        .map_err(|err| Error::GasError(err.to_string()))?;
 
     Ok(vps_result)
 }
@@ -801,7 +797,6 @@ fn execute_vps<D, H, CA>(
     storage: &Storage<D, H>,
     write_log: &WriteLog,
     tx_gas_meter: &TxGasMeter,
-    invalid_sig_sentinel: &mut bool,
     vp_wasm_cache: &mut VpCache<CA>,
 ) -> Result<VpsResult>
 where
@@ -809,56 +804,62 @@ where
     H: 'static + StorageHasher + Sync,
     CA: 'static + WasmCacheAccess + Sync,
 {
-    let (vps_result, invalid_sig) = verifiers
+    let vps_result = verifiers
         .par_iter()
-        .try_fold(
-            || (VpsResult::default(), false),
-            |(mut result, mut invalid_sig), addr| {
-                let mut gas_meter = VpGasMeter::new_from_tx_meter(tx_gas_meter);
-                let accept = match &addr {
-                    Address::Implicit(_) | Address::Established(_) => {
-                        let (vp_hash, gas) = storage
-                            .validity_predicate(addr)
-                            .map_err(Error::StorageError)?;
-                        gas_meter.consume(gas).map_err(Error::GasError)?;
-                        let Some(vp_code_hash) = vp_hash else {
+        .try_fold(VpsResult::default, |mut result, addr| {
+            let mut gas_meter = VpGasMeter::new_from_tx_meter(tx_gas_meter);
+            let accept = match &addr {
+                Address::Implicit(_) | Address::Established(_) => {
+                    let (vp_hash, gas) = storage
+                        .validity_predicate(addr)
+                        .map_err(Error::StorageError)?;
+                    gas_meter
+                        .consume(gas)
+                        .map_err(|err| Error::GasError(err.to_string()))?;
+                    let Some(vp_code_hash) = vp_hash else {
                         return Err(Error::MissingAddress(addr.clone()));
                     };
 
-                        // NOTE: because of the whitelisted gas and the gas metering
-                        // for the exposed vm env functions,
-                        //    the first signature verification (if any) is accounted
-                        // twice
-                        wasm::run::vp(
-                            vp_code_hash,
-                            tx,
-                            tx_index,
-                            addr,
-                            storage,
-                            write_log,
-                            &mut gas_meter,
-                            &mut invalid_sig,
-                            &keys_changed,
-                            &verifiers,
-                            vp_wasm_cache.clone(),
-                        )
-                        .map_err(Error::VpRunnerError)
-                    }
-                    Address::Internal(internal_addr) => {
-                        let ctx = native_vp::Ctx::new(
-                            addr,
-                            storage,
-                            write_log,
-                            tx,
-                            tx_index,
-                            gas_meter,
-                            invalid_sig,
-                            &keys_changed,
-                            &verifiers,
-                            vp_wasm_cache.clone(),
-                        );
+                    // NOTE: because of the whitelisted gas and the gas
+                    // metering for the exposed vm
+                    // env functions,    the first
+                    // signature verification (if any) is accounted
+                    // twice
+                    wasm::run::vp(
+                        vp_code_hash,
+                        tx,
+                        tx_index,
+                        addr,
+                        storage,
+                        write_log,
+                        &mut gas_meter,
+                        &keys_changed,
+                        &verifiers,
+                        vp_wasm_cache.clone(),
+                    )
+                    .map_err(|err| match err {
+                        wasm::run::Error::GasError(msg) => Error::GasError(msg),
+                        wasm::run::Error::InvalidTxSignature(msg) => {
+                            Error::InvalidTxSignature(msg)
+                        }
+                        _ => Error::VpRunnerError(err),
+                    })
+                }
+                Address::Internal(internal_addr) => {
+                    let ctx = native_vp::Ctx::new(
+                        addr,
+                        storage,
+                        write_log,
+                        tx,
+                        tx_index,
+                        gas_meter,
+                        &keys_changed,
+                        &verifiers,
+                        vp_wasm_cache.clone(),
+                    );
 
-                        let accepted: Result<bool> = match internal_addr {
+                    let (accepted, sentinels): (Result<bool>, _) =
+                        match internal_addr {
                             InternalAddress::PoS => {
                                 let pos = PosVP { ctx };
                                 let verifiers_addr_ref = &verifiers;
@@ -890,103 +891,93 @@ where
                                             Err(Error::PosNativeVpRuntime)
                                         }
                                     };
-                                // Take the gas meter and signature sentinel
+                                // Take the gas meter and sentinels
                                 // back
                                 // out of the context
                                 gas_meter = pos.ctx.gas_meter.into_inner();
-                                invalid_sig = pos.ctx.invalid_sig.into_inner();
-                                result
+                                (result, pos.ctx.sentinels.into_inner())
                             }
                             InternalAddress::Ibc => {
                                 let ibc = Ibc { ctx };
                                 let result = ibc
                                     .validate_tx(tx, &keys_changed, &verifiers)
                                     .map_err(Error::IbcNativeVpError);
-                                // Take the gas meter and signature sentinel
+                                // Take the gas meter and the sentinels
                                 // back
                                 // out of the context
                                 gas_meter = ibc.ctx.gas_meter.into_inner();
-                                invalid_sig = ibc.ctx.invalid_sig.into_inner();
-                                result
+                                (result, ibc.ctx.sentinels.into_inner())
                             }
                             InternalAddress::Parameters => {
                                 let parameters = ParametersVp { ctx };
                                 let result = parameters
                                     .validate_tx(tx, &keys_changed, &verifiers)
                                     .map_err(Error::ParametersNativeVpError);
-                                // Take the gas meter and signature sentinel
+                                // Take the gas meter and the sentinels
                                 // back
                                 // out of the context
                                 gas_meter =
                                     parameters.ctx.gas_meter.into_inner();
-                                invalid_sig =
-                                    parameters.ctx.invalid_sig.into_inner();
-                                result
+                                (result, parameters.ctx.sentinels.into_inner())
                             }
                             InternalAddress::PosSlashPool => {
-                                // Take the gas meter and signature sentinel
+                                // Take the gas meter and the sentinels
                                 // back
                                 // out of the context
                                 gas_meter = ctx.gas_meter.into_inner();
-                                invalid_sig = ctx.invalid_sig.into_inner();
-                                Err(Error::AccessForbidden(
-                                    (*internal_addr).clone(),
-                                ))
+                                (
+                                    Err(Error::AccessForbidden(
+                                        (*internal_addr).clone(),
+                                    )),
+                                    ctx.sentinels.into_inner(),
+                                )
                             }
                             InternalAddress::Governance => {
                                 let governance = GovernanceVp { ctx };
                                 let result = governance
                                     .validate_tx(tx, &keys_changed, &verifiers)
                                     .map_err(Error::GovernanceNativeVpError);
-                                // Take the gas meter and signature sentinel
+                                // Take the gas meter and the sentinels
                                 // back
                                 // out of the context
                                 gas_meter =
                                     governance.ctx.gas_meter.into_inner();
-                                invalid_sig =
-                                    governance.ctx.invalid_sig.into_inner();
-                                result
+                                (result, governance.ctx.sentinels.into_inner())
                             }
                             InternalAddress::Multitoken => {
                                 let multitoken = MultitokenVp { ctx };
                                 let result = multitoken
                                     .validate_tx(tx, &keys_changed, &verifiers)
                                     .map_err(Error::MultitokenNativeVpError);
-                                // Take the gas meter and signature sentinel
+                                // Take the gas meter and the sentinels
                                 // back
                                 // out of the context
                                 gas_meter =
                                     multitoken.ctx.gas_meter.into_inner();
-                                invalid_sig =
-                                    multitoken.ctx.invalid_sig.into_inner();
-                                result
+                                (result, multitoken.ctx.sentinels.into_inner())
                             }
                             InternalAddress::EthBridge => {
                                 let bridge = EthBridge { ctx };
                                 let result = bridge
                                     .validate_tx(tx, &keys_changed, &verifiers)
                                     .map_err(Error::EthBridgeNativeVpError);
-                                // Take the gas meter and signature sentinel
+                                // Take the gas meter and the sentinels
                                 // back
                                 // out of the context
                                 gas_meter = bridge.ctx.gas_meter.into_inner();
-                                invalid_sig =
-                                    bridge.ctx.invalid_sig.into_inner();
-                                result
+                                (result, bridge.ctx.sentinels.into_inner())
                             }
                             InternalAddress::EthBridgePool => {
                                 let bridge_pool = BridgePoolVp { ctx };
                                 let result = bridge_pool
                                     .validate_tx(tx, &keys_changed, &verifiers)
                                     .map_err(Error::BridgePoolNativeVpError);
-                                // Take the gas meter and signature sentinel
+                                // Take the gas meter and the sentinels
                                 // back
                                 // out of the context
                                 gas_meter =
                                     bridge_pool.ctx.gas_meter.into_inner();
-                                invalid_sig =
-                                    bridge_pool.ctx.invalid_sig.into_inner();
-                                result
+                                (result, bridge_pool.ctx.sentinels.into_inner())
                             }
                             InternalAddress::ReplayProtection => {
                                 let replay_protection_vp =
@@ -996,108 +987,121 @@ where
                                     .map_err(
                                         Error::ReplayProtectionNativeVpError,
                                     );
-                                // Take the gas meter and signature sentinel
+                                // Take the gas meter and the sentinels
                                 // back
                                 // out of the context
                                 gas_meter = replay_protection_vp
                                     .ctx
                                     .gas_meter
                                     .into_inner();
-                                invalid_sig = replay_protection_vp
-                                    .ctx
-                                    .invalid_sig
-                                    .into_inner();
-                                result
+                                (
+                                    result,
+                                    replay_protection_vp
+                                        .ctx
+                                        .sentinels
+                                        .into_inner(),
+                                )
                             }
                             InternalAddress::Pgf => {
                                 let pgf_vp = PgfVp { ctx };
                                 let result = pgf_vp
                                     .validate_tx(tx, &keys_changed, &verifiers)
                                     .map_err(Error::PgfNativeVpError);
-                                // Take the gas meter and signature sentinel
+                                // Take the gas meter and the sentinels
                                 // back
                                 // out of the context
                                 gas_meter = pgf_vp.ctx.gas_meter.into_inner();
-                                invalid_sig =
-                                    pgf_vp.ctx.invalid_sig.into_inner();
-                                result
+                                (result, pgf_vp.ctx.sentinels.into_inner())
                             }
                             InternalAddress::Nut(_) => {
                                 let non_usable_tokens = NonUsableTokens { ctx };
                                 let result = non_usable_tokens
                                     .validate_tx(tx, &keys_changed, &verifiers)
                                     .map_err(Error::NutNativeVpError);
-                                // Take the gas meter and signature sentinel
+                                // Take the gas meter and the sentinels
                                 // back
                                 // out of the context
                                 gas_meter = non_usable_tokens
                                     .ctx
                                     .gas_meter
                                     .into_inner();
-                                invalid_sig = non_usable_tokens
-                                    .ctx
-                                    .invalid_sig
-                                    .into_inner();
-                                result
+                                (
+                                    result,
+                                    non_usable_tokens
+                                        .ctx
+                                        .sentinels
+                                        .into_inner(),
+                                )
                             }
                             InternalAddress::IbcToken(_)
                             | InternalAddress::Erc20(_) => {
                                 // The address should be a part of a multitoken
                                 // key
-                                // Take the gas meter and signature sentinel
+                                // Take the gas meter and the sentinels
                                 // back
                                 // out of the context
                                 gas_meter = ctx.gas_meter.into_inner();
-                                invalid_sig = ctx.invalid_sig.into_inner();
-                                Ok(verifiers.contains(&Address::Internal(
-                                    InternalAddress::Multitoken,
-                                )))
+                                (
+                                    Ok(verifiers.contains(&Address::Internal(
+                                        InternalAddress::Multitoken,
+                                    ))),
+                                    ctx.sentinels.into_inner(),
+                                )
                             }
                         };
 
-                        accepted
-                    }
-                };
-
-                result.gas_used.set(gas_meter).map_err(Error::GasError)?;
-                match accept {
-                    Ok(accepted) => {
-                        if accepted {
-                            result.accepted_vps.insert(addr.clone());
+                    accepted.map_err(|err| {
+                        if sentinels.out_of_gas {
+                            Error::GasError(err.to_string())
+                        } else if sentinels.invalid_sig {
+                            Error::InvalidTxSignature(err.to_string())
                         } else {
-                            result.rejected_vps.insert(addr.clone());
+                            err
                         }
-                    }
-                    Err(err) => match err {
-                        // Execution of VPs can (and must) be short-circuited
-                        // only in case of a gas overflow to prevent the
-                        // transaction from conuming resources that have not
-                        // been acquired in the corresponding wrapper tx. For
-                        // all the other errors we keep evaluating the vps. This
-                        // allow to display a consistent VpsResult accross all
-                        // nodes and find any invalid signatures
-                        Error::GasError(_) => return Err(err),
-                        _ => {
-                            result.rejected_vps.insert(addr.clone());
-                            result.errors.push((addr.clone(), err.to_string()));
-                        }
-                    },
+                    })
                 }
+            };
 
-                Ok((result, invalid_sig))
-            },
-        )
-        .try_reduce(
-            || (VpsResult::default(), false),
-            |(a, invalid_a_sig), (b, invalid_b_sig)| {
-                Ok((
-                    merge_vp_results(a, b, tx_gas_meter)?,
-                    invalid_a_sig || invalid_b_sig,
-                ))
-            },
-        )?;
+            match accept {
+                Ok(accepted) => {
+                    if accepted {
+                        result.accepted_vps.insert(addr.clone());
+                    } else {
+                        result.rejected_vps.insert(addr.clone());
+                    }
+                }
+                Err(err) => match err {
+                    // Execution of VPs can (and must) be short-circuited
+                    // only in case of a gas overflow to prevent the
+                    // transaction from conuming resources that have not
+                    // been acquired in the corresponding wrapper tx. For
+                    // all the other errors we keep evaluating the vps. This
+                    // allow to display a consistent VpsResult accross all
+                    // nodes and find any invalid signatures
+                    Error::GasError(_) => {
+                        return Err(err);
+                    }
+                    _ => {
+                        if let Error::InvalidTxSignature(_) = err {
+                            result.invalid_sig = true
+                        }
+                        result.rejected_vps.insert(addr.clone());
+                        result.errors.push((addr.clone(), err.to_string()));
+                    }
+                },
+            }
 
-    *invalid_sig_sentinel = invalid_sig;
+            result
+                .gas_used
+                .set(gas_meter)
+                .map_err(|err| Error::GasError(err.to_string()))?;
+
+            Ok(result)
+        })
+        .try_reduce(VpsResult::default, |a, b| {
+            merge_vp_results(a, b, tx_gas_meter)
+        })?;
+
     Ok(vps_result)
 }
 
@@ -1113,15 +1117,19 @@ fn merge_vp_results(
     rejected_vps.extend(b.rejected_vps);
     let mut errors = a.errors;
     errors.append(&mut b.errors);
+    let invalid_sig = a.invalid_sig || b.invalid_sig;
     let mut gas_used = a.gas_used;
 
-    gas_used.merge(b.gas_used, tx_gas_meter)?;
+    gas_used
+        .merge(b.gas_used, tx_gas_meter)
+        .map_err(|err| Error::GasError(err.to_string()))?;
 
     Ok(VpsResult {
         accepted_vps,
         rejected_vps,
         gas_used,
         errors,
+        invalid_sig,
     })
 }
 

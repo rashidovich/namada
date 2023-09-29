@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use borsh::BorshDeserialize;
 use eyre::WrapErr;
 pub use namada_core::ledger::vp_env::VpEnv;
+use namada_core::types::validity_predicate::VpSentinels;
 
 use super::storage_api::{self, ResultExt, StorageRead};
 use super::vp_host_fns;
@@ -66,9 +67,8 @@ where
     pub iterators: RefCell<PrefixIterators<'a, DB>>,
     /// VP gas meter.
     pub gas_meter: RefCell<VpGasMeter>,
-    /// Invalid sig flag. This is not strictly required for native vps but it's
-    /// needed in case of a call to `eval`
-    pub invalid_sig: RefCell<bool>,
+    /// Errors sentinels
+    pub sentinels: RefCell<VpSentinels>,
     /// Read-only access to the storage.
     pub storage: &'a Storage<DB, H>,
     /// Read-only access to the write log.
@@ -130,7 +130,6 @@ where
         tx: &'a Tx,
         tx_index: &'a TxIndex,
         gas_meter: VpGasMeter,
-        invalid_sig: bool,
         keys_changed: &'a BTreeSet<Key>,
         verifiers: &'a BTreeSet<Address>,
         #[cfg(feature = "wasm-runtime")]
@@ -140,7 +139,7 @@ where
             address,
             iterators: RefCell::new(PrefixIterators::default()),
             gas_meter: RefCell::new(gas_meter),
-            invalid_sig: RefCell::new(invalid_sig),
+            sentinels: RefCell::new(VpSentinels::default()),
             storage,
             write_log,
             tx,
@@ -187,6 +186,7 @@ where
             self.ctx.storage,
             self.ctx.write_log,
             key,
+            &mut self.ctx.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -200,6 +200,7 @@ where
             self.ctx.storage,
             self.ctx.write_log,
             key,
+            &mut self.ctx.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -213,6 +214,7 @@ where
             self.ctx.write_log,
             self.ctx.storage,
             prefix,
+            &mut self.ctx.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -224,8 +226,12 @@ where
         &'iter self,
         iter: &mut Self::PrefixIter<'iter>,
     ) -> Result<Option<(String, Vec<u8>)>, storage_api::Error> {
-        vp_host_fns::iter_next::<DB>(&mut self.ctx.gas_meter.borrow_mut(), iter)
-            .into_storage_result()
+        vp_host_fns::iter_next::<DB>(
+            &mut self.ctx.gas_meter.borrow_mut(),
+            iter,
+            &mut self.ctx.sentinels.borrow_mut(),
+        )
+        .into_storage_result()
     }
 
     fn get_chain_id(&self) -> Result<String, storage_api::Error> {
@@ -278,6 +284,7 @@ where
             self.ctx.storage,
             self.ctx.write_log,
             key,
+            &mut self.ctx.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -291,6 +298,7 @@ where
             self.ctx.storage,
             self.ctx.write_log,
             key,
+            &mut self.ctx.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -304,6 +312,7 @@ where
             self.ctx.write_log,
             self.ctx.storage,
             prefix,
+            &mut self.ctx.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -315,8 +324,12 @@ where
         &'iter self,
         iter: &mut Self::PrefixIter<'iter>,
     ) -> Result<Option<(String, Vec<u8>)>, storage_api::Error> {
-        vp_host_fns::iter_next::<DB>(&mut self.ctx.gas_meter.borrow_mut(), iter)
-            .into_storage_result()
+        vp_host_fns::iter_next::<DB>(
+            &mut self.ctx.gas_meter.borrow_mut(),
+            iter,
+            &mut self.ctx.sentinels.borrow_mut(),
+        )
+        .into_storage_result()
     }
 
     fn get_chain_id(&self) -> Result<String, storage_api::Error> {
@@ -377,6 +390,7 @@ where
             &mut self.gas_meter.borrow_mut(),
             self.write_log,
             key,
+            &mut self.sentinels.borrow_mut(),
         )
         .map(|data| data.and_then(|t| T::try_from_slice(&t[..]).ok()))
         .into_storage_result()
@@ -390,6 +404,7 @@ where
             &mut self.gas_meter.borrow_mut(),
             self.write_log,
             key,
+            &mut self.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -398,6 +413,7 @@ where
         vp_host_fns::get_chain_id(
             &mut self.gas_meter.borrow_mut(),
             self.storage,
+            &mut self.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -406,6 +422,7 @@ where
         vp_host_fns::get_block_height(
             &mut self.gas_meter.borrow_mut(),
             self.storage,
+            &mut self.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -418,6 +435,7 @@ where
             &mut self.gas_meter.borrow_mut(),
             self.storage,
             height,
+            &mut self.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -426,6 +444,7 @@ where
         vp_host_fns::get_block_hash(
             &mut self.gas_meter.borrow_mut(),
             self.storage,
+            &mut self.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -434,6 +453,7 @@ where
         vp_host_fns::get_block_epoch(
             &mut self.gas_meter.borrow_mut(),
             self.storage,
+            &mut self.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -442,6 +462,7 @@ where
         vp_host_fns::get_tx_index(
             &mut self.gas_meter.borrow_mut(),
             self.tx_index,
+            &mut self.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -450,6 +471,7 @@ where
         vp_host_fns::get_native_token(
             &mut self.gas_meter.borrow_mut(),
             self.storage,
+            &mut self.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -463,6 +485,7 @@ where
             self.write_log,
             self.storage,
             prefix,
+            &mut self.sentinels.borrow_mut(),
         )
         .into_storage_result()
     }
@@ -494,7 +517,7 @@ where
                 self.storage,
                 self.write_log,
                 &mut self.gas_meter.borrow_mut(),
-                &mut self.invalid_sig.borrow_mut(),
+                &mut self.sentinels.borrow_mut(),
                 self.tx,
                 self.tx_index,
                 &mut iterators,
@@ -537,8 +560,12 @@ where
     }
 
     fn get_tx_code_hash(&self) -> Result<Option<Hash>, storage_api::Error> {
-        vp_host_fns::get_tx_code_hash(&mut self.gas_meter.borrow_mut(), self.tx)
-            .into_storage_result()
+        vp_host_fns::get_tx_code_hash(
+            &mut self.gas_meter.borrow_mut(),
+            self.tx,
+            &mut self.sentinels.borrow_mut(),
+        )
+        .into_storage_result()
     }
 
     fn read_pre<T: borsh::BorshDeserialize>(

@@ -17,3 +17,13 @@ pub struct EvalVp {
     /// The input for the `eval`ed VP
     pub input: Tx,
 }
+
+/// Sentinels used in validity predicated to signal events that require special
+/// handling back to the protocol.
+#[derive(Debug, Default)]
+pub struct VpSentinels {
+    /// Exceeded gas limit
+    pub out_of_gas: bool,
+    /// Found invalid transaction signature
+    pub invalid_sig: bool,
+}

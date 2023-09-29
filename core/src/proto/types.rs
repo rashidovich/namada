@@ -23,7 +23,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use super::generated::types;
-use crate::ledger::gas::{GasMetering, VpGasMeter, VERIFY_TX_SIG_GAS_COST};
+use crate::ledger::gas::{
+    self, GasMetering, VpGasMeter, VERIFY_TX_SIG_GAS_COST,
+};
 use crate::ledger::storage::{KeccakHasher, Sha256Hasher, StorageHasher};
 #[cfg(any(feature = "tendermint", feature = "tendermint-abcipp"))]
 use crate::tendermint_proto::abci::ResponseDeliverTx;
@@ -71,8 +73,8 @@ pub enum Error {
     InvalidJSONDeserialization(String),
     #[error("The wrapper signature is invalid.")]
     InvalidWrapperSignature,
-    #[error("Signature verification went out of gas")]
-    OutOfGas,
+    #[error("Signature verification went out of gas: {0}")]
+    OutOfGas(gas::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -1426,7 +1428,7 @@ impl Tx {
                             + verified_pks.len()
                             - prev_verifieds;
                         x.consume(VERIFY_TX_SIG_GAS_COST * amt_verified as u64)
-                            .map_err(|_| Error::OutOfGas)?;
+                            .map_err(Error::OutOfGas)?;
                     }
                     // Record the section witnessing these signatures
                     if amt_verifieds? > 0 {

@@ -260,7 +260,6 @@ mod tests {
             VpGasMeter::new_from_tx_meter(&TxGasMeter::new_from_sub_limit(
                 u64::MAX.into(),
             )),
-            false,
             keys_changed,
             verifiers,
             VpCache::new(temp_dir(), 100usize),

@@ -60,7 +60,6 @@ fn replay_protection(c: &mut Criterion) {
             VpGasMeter::new_from_tx_meter(&TxGasMeter::new_from_sub_limit(
                 u64::MAX.into(),
             )),
-            false,
             &keys_changed,
             &verifiers,
             shell.vp_wasm_cache.clone(),
@@ -224,7 +223,6 @@ fn governance(c: &mut Criterion) {
                 VpGasMeter::new_from_tx_meter(&TxGasMeter::new_from_sub_limit(
                     u64::MAX.into(),
                 )),
-                false,
                 &keys_changed,
                 &verifiers,
                 shell.vp_wasm_cache.clone(),
@@ -389,7 +387,6 @@ fn ibc(c: &mut Criterion) {
                 VpGasMeter::new_from_tx_meter(&TxGasMeter::new_from_sub_limit(
                     u64::MAX.into(),
                 )),
-                false,
                 &keys_changed,
                 &verifiers,
                 shell.vp_wasm_cache.clone(),
@@ -455,7 +452,6 @@ fn vp_multitoken(c: &mut Criterion) {
                 VpGasMeter::new_from_tx_meter(&TxGasMeter::new_from_sub_limit(
                     u64::MAX.into(),
                 )),
-                false,
                 &keys_changed,
                 &verifiers,
                 shell.vp_wasm_cache.clone(),

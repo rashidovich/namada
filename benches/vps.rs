@@ -158,7 +158,6 @@ fn vp_user(c: &mut Criterion) {
                         &mut VpGasMeter::new_from_tx_meter(
                             &TxGasMeter::new_from_sub_limit(u64::MAX.into())
                         ),
-                        &mut false,
                         &keys_changed,
                         &verifiers,
                         shell.vp_wasm_cache.clone(),
@@ -305,7 +304,6 @@ fn vp_implicit(c: &mut Criterion) {
                         &mut VpGasMeter::new_from_tx_meter(
                             &TxGasMeter::new_from_sub_limit(u64::MAX.into())
                         ),
-                        &mut false,
                         &keys_changed,
                         &verifiers,
                         shell.vp_wasm_cache.clone(),
@@ -455,7 +453,6 @@ fn vp_validator(c: &mut Criterion) {
                         &mut VpGasMeter::new_from_tx_meter(
                             &TxGasMeter::new_from_sub_limit(u64::MAX.into())
                         ),
-                        &mut false,
                         &keys_changed,
                         &verifiers,
                         shell.vp_wasm_cache.clone(),
@@ -545,7 +542,6 @@ fn vp_masp(c: &mut Criterion) {
                         &mut VpGasMeter::new_from_tx_meter(
                             &TxGasMeter::new_from_sub_limit(u64::MAX.into())
                         ),
-                        &mut false,
                         &keys_changed,
                         &verifiers,
                         shielded_ctx.shell.vp_wasm_cache.clone(),

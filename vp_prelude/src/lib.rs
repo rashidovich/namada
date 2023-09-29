@@ -79,6 +79,7 @@ pub fn is_proposal_accepted(ctx: &Ctx, proposal_id: u64) -> VpResult {
 }
 
 /// Verify section signatures
+// FIXME: this shall not be a VpResult
 pub fn verify_signatures(ctx: &Ctx, tx: &Tx, owner: &Address) -> VpResult {
     let max_signatures_per_transaction =
         parameters::max_signatures_per_transaction(&ctx.pre())?;
@@ -96,7 +97,7 @@ pub fn verify_signatures(ctx: &Ctx, tx: &Tx, owner: &Address) -> VpResult {
     let targets = targets.try_to_vec().unwrap();
     let signer = owner.try_to_vec().unwrap();
 
-    let valid = unsafe {
+    unsafe {
         namada_vp_verify_tx_section_signature(
             targets.as_ptr() as _,
             targets.len() as _,
@@ -110,7 +111,7 @@ pub fn verify_signatures(ctx: &Ctx, tx: &Tx, owner: &Address) -> VpResult {
         )
     };
 
-    Ok(HostEnvResult::is_success(valid))
+    Ok(true)
 }
 
 /// Checks whether a transaction is valid, which happens in two cases:

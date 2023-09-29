@@ -430,8 +430,6 @@ where
                     },
                 };
 
-            let mut invalid_sig_sentinel = false;
-
             match protocol::dispatch_tx(
                 tx,
                 processed_tx.tx.as_ref(),
@@ -441,7 +439,6 @@ where
                         .expect("transaction index out of bounds"),
                 ),
                 &mut tx_gas_meter,
-                &mut invalid_sig_sentinel,
                 &mut self.wl_storage,
                 &mut self.vp_wasm_cache,
                 &mut self.tx_wasm_cache,
@@ -510,7 +507,7 @@ where
                         );
 
                         if let Some(hash) = decrypted_tx_hash {
-                            if invalid_sig_sentinel {
+                            if result.vps_result.invalid_sig {
                                 // Invalid signature was found, remove the tx
                                 // hash from storage to allow replay
                                 let tx_hash_key =
@@ -538,24 +535,12 @@ where
                         msg
                     );
 
-                    if let Some(hash) = decrypted_tx_hash {
-                        if invalid_sig_sentinel {
-                            // Invalid signature was found, remove the tx
-                            // hash from storage to allow replay
-                            let tx_hash_key =
-                                replay_protection::get_replay_protection_key(
-                                    &hash,
-                                );
-                            self.wl_storage.delete(&tx_hash_key).expect(
-                                "Error while deleting tx hash key from storage",
-                            );
-                        }
-                    }
-
                     // If transaction type is Decrypted and failed because of
                     // out of gas, remove its hash from storage to allow
                     // rewrapping it
                     if let Some(hash) = decrypted_tx_hash {
+                        // Indeed this should always happen because a GasError
+                        // is the only error that gets propagated
                         if let Error::TxApply(protocol::Error::GasError(_)) =
                             msg
                         {
@@ -2468,7 +2453,7 @@ mod test_finalize_block {
 
         shell.enqueue_tx(out_of_gas_wrapper, Gas::default());
         shell.enqueue_tx(undecryptable_wrapper, GAS_LIMIT_MULTIPLIER.into());
-        shell.enqueue_tx(unsigned_wrapper, GAS_LIMIT_MULTIPLIER.into());
+        shell.enqueue_tx(unsigned_wrapper, u64::MAX.into()); // Prevent out of gas which would still make the test pass
         shell.enqueue_tx(failing_wrapper, GAS_LIMIT_MULTIPLIER.into());
         // merkle tree root before finalize_block
         let root_pre = shell.shell.wl_storage.storage.block.tree.root();
@@ -2505,7 +2490,7 @@ mod test_finalize_block {
             .get("code")
             .expect("Testfailed")
             .as_str();
-        assert_eq!(code, String::from(ErrorCodes::WasmRuntimeError).as_str());
+        assert_eq!(code, String::from(ErrorCodes::InvalidTx).as_str());
         assert_eq!(event[3].event_type.to_string(), String::from("applied"));
         let code = event[3]
             .attributes
@@ -4017,7 +4002,6 @@ mod test_finalize_block {
             &tx,
             &TxIndex(0),
             gas_meter,
-            false,
             &keys_changed,
             &verifiers,
             shell.vp_wasm_cache.clone(),
