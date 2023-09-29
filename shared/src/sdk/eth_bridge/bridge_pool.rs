@@ -40,7 +40,7 @@ use crate::types::io::Io;
 use crate::types::keccak::KeccakHash;
 use crate::types::token::{Amount, DenominatedAmount};
 use crate::types::voting_power::FractionalVotingPower;
-use crate::{display, display_line};
+use crate::{display, display_line, edisplay_line};
 
 /// Craft a transaction that adds a transfer to the Ethereum bridge pool.
 pub async fn build_bridge_pool_tx<
@@ -293,7 +293,7 @@ where
             let resp = IO::read().await.map_err(|e| {
                 let msg =
                     format!("Encountered error reading from STDIN: {e:?}");
-                display_line!(IO, "{msg}");
+                edisplay_line!(IO, "{msg}");
                 Error::Other(msg)
             })?;
             match resp.trim() {
@@ -318,7 +318,11 @@ where
         .generate_bridge_pool_proof(client, Some(data), None, false)
         .await
         .map_err(|e| {
-            display_line!(IO, "Encountered error constructing proof:\n{:?}", e);
+            edisplay_line!(
+                IO,
+                "Encountered error constructing proof:\n{:?}",
+                e
+            );
             Error::EthereumBridge(EthereumBridgeError::GenBridgePoolProof(
                 e.to_string(),
             ))
@@ -453,7 +457,7 @@ where
         AbiDecode::decode(&abi_encoded_args).map_err(|error| {
             let msg =
                 format!("Unable to decode the generated proof: {:?}", error);
-            display_line!(IO, "{msg}");
+            edisplay_line!(IO, "{msg}");
             EncodingError::Decoding(msg)
         })?;
 
@@ -965,7 +969,7 @@ mod recommendations {
                 bridge_pool_gas_fees: total_fees,
             })
         } else {
-            display_line!(
+            edisplay_line!(
                 IO,
                 "Unable to find a recommendation satisfying the input \
                  parameters."

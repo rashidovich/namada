@@ -1056,7 +1056,7 @@ where
     .await
     // maybe time out
     .map_err(|_| {
-        display_line!(
+        edisplay_line!(
             IO,
             "Node is still catching up, wait for it to finish synching."
         );
