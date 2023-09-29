@@ -82,8 +82,8 @@ pub enum Error {
     GasError(String),
     #[error("Failed type conversion: {0}")]
     ConversionError(String),
-    #[error("Invalid transaction signature: {0}")]
-    InvalidTxSignature(String),
+    #[error("Invalid transaction signature")]
+    InvalidTxSignature,
 }
 
 /// Result for functions that may fail
@@ -239,7 +239,7 @@ where
         memory::prepare_vp_memory(&store).map_err(Error::MemoryError)?;
     let imports = vp_imports(&store, initial_memory, env);
 
-    run_vp(
+    match run_vp(
         module,
         imports,
         &vp_code_hash,
@@ -248,16 +248,22 @@ where
         keys_changed,
         verifiers,
         gas_meter,
-    )
-    .map_err(|err| {
-        if sentinels.out_of_gas {
-            Error::GasError(err.to_string())
-        } else if sentinels.invalid_sig {
-            Error::InvalidTxSignature(err.to_string())
-        } else {
-            err
+    ) {
+        Ok(accept) => {
+            if !accept && sentinels.invalid_sig {
+                Err(Error::InvalidTxSignature)
+            } else {
+                Ok(accept)
+            }
         }
-    })
+        Err(err) => {
+            if sentinels.out_of_gas {
+                Err(Error::GasError(err.to_string()))
+            } else {
+                Err(err)
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

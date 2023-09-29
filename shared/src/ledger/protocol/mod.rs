@@ -61,8 +61,8 @@ pub enum Error {
     GasError(String),
     #[error("Error while processing transaction's fees: {0}")]
     FeeError(String),
-    #[error("Invalid transaction signature: {0}")]
-    InvalidTxSignature(String),
+    #[error("Invalid transaction signature")]
+    InvalidTxSignature,
     #[error("Error executing VP for addresses: {0:?}")]
     VpRunnerError(vm::wasm::run::Error),
     #[error("The address {0} doesn't exist")]
@@ -839,8 +839,8 @@ where
                     )
                     .map_err(|err| match err {
                         wasm::run::Error::GasError(msg) => Error::GasError(msg),
-                        wasm::run::Error::InvalidTxSignature(msg) => {
-                            Error::InvalidTxSignature(msg)
+                        wasm::run::Error::InvalidTxSignature => {
+                            Error::InvalidTxSignature
                         }
                         _ => Error::VpRunnerError(err),
                     })
@@ -1051,10 +1051,10 @@ where
                         };
 
                     accepted.map_err(|err| {
+                        // No need to check invalid sig because internal vps
+                        // don't check the signature
                         if sentinels.out_of_gas {
                             Error::GasError(err.to_string())
-                        } else if sentinels.invalid_sig {
-                            Error::InvalidTxSignature(err.to_string())
                         } else {
                             err
                         }
@@ -1081,10 +1081,12 @@ where
                     Error::GasError(_) => {
                         return Err(err);
                     }
+                    Error::InvalidTxSignature => {
+                        result.invalid_sig = true;
+                        result.rejected_vps.insert(addr.clone());
+                        // Don't push the error since this is just a flag error
+                    }
                     _ => {
-                        if let Error::InvalidTxSignature(_) = err {
-                            result.invalid_sig = true
-                        }
                         result.rejected_vps.insert(addr.clone());
                         result.errors.push((addr.clone(), err.to_string()));
                     }

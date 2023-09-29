@@ -1834,7 +1834,7 @@ pub fn vp_verify_tx_section_signature<MEM, DB, H, EVAL, CA>(
     threshold: u8,
     max_signatures_ptr: u64,
     max_signatures_len: u64,
-) -> vp_host_fns::EnvResult<()>
+) -> vp_host_fns::EnvResult<i64>
 where
     MEM: VmMemory,
     DB: storage::DB + for<'iter> storage::DBIter<'iter>,
@@ -1890,7 +1890,7 @@ where
         max_signatures,
         Some(gas_meter),
     ) {
-        Ok(_) => Ok(()),
+        Ok(_) => Ok(HostEnvResult::Success.to_i64()),
         Err(err) => match err {
             namada_core::proto::Error::OutOfGas(inner) => {
                 sentinels.out_of_gas = true;
@@ -1898,9 +1898,7 @@ where
             }
             _ => {
                 sentinels.invalid_sig = true;
-                Err(vp_host_fns::RuntimeError::InvalidSignature(
-                    err.to_string(),
-                ))
+                Ok(HostEnvResult::Fail.to_i64())
             }
         },
     }

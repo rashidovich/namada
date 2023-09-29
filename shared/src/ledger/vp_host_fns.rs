@@ -39,8 +39,6 @@ pub enum RuntimeError {
     ReadPermanentValueError,
     #[error("Invalid transaction code hash")]
     InvalidCodeHash,
-    #[error("Invalid transaction signature: {0}")]
-    InvalidSignature(String),
 }
 
 /// VP environment function result

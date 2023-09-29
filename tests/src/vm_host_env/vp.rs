@@ -378,6 +378,6 @@ mod native_vp_host_env {
         threshold: u8,
         max_signatures_ptr: u64,
         max_signatures_len: u64,
-    ));
+    ) -> i64);
     native_host_fn!(vp_charge_gas(used_gas: u64));
 }
