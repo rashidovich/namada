@@ -4331,6 +4331,12 @@ impl AbstractPosState {
             let to_modify =
                 val_slash_amounts.entry(dest_val.clone()).or_default();
 
+            tracing::debug!(
+                "Slashing {} redelegation to {}",
+                validator,
+                &dest_val
+            );
+
             // `slashValidatorRedelegation`
             self.slash_validator_redelegation(
                 validator, &dest_val, slash_rate, to_modify,
@@ -4893,7 +4899,7 @@ impl AbstractPosState {
         slash_rate: Dec,
         slash_amounts: &mut BTreeMap<Epoch, token::Change>,
     ) {
-        tracing::debug!("\nSLASHING VAL REDELEGATIONS\n");
+        // tracing::debug!("\nSLASHING VAL REDELEGATIONS\n");
 
         let infraction_epoch =
             self.epoch - self.params.slash_processing_epoch_offset();

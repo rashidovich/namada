@@ -4417,9 +4417,10 @@ where
         compute_cubic_slash_rate(storage, &params, infraction_epoch)?;
 
     // Collect the enqueued slashes and update their rates
-    let mut eager_validator_slashes: HashMap<Address, Vec<Slash>> =
-        HashMap::new(); // TODO: will need to update this in storage later
-    let mut eager_validator_slash_rates: HashMap<Address, Dec> = HashMap::new();
+    let mut eager_validator_slashes: BTreeMap<Address, Vec<Slash>> =
+        BTreeMap::new(); // TODO: will need to update this in storage later
+    let mut eager_validator_slash_rates: BTreeMap<Address, Dec> =
+        BTreeMap::new();
 
     // `slashPerValidator` and `slashesMap` while also updating in storage
     for enqueued_slash in enqueued_slashes.iter(storage)? {
@@ -4609,6 +4610,11 @@ where
             .or_default();
 
         // `slashValidatorRedelegation`
+        tracing::debug!(
+            "Slashing {} redelegation to {}",
+            validator,
+            &dest_validator
+        );
         slash_validator_redelegation(
             storage,
             params,
@@ -4664,7 +4670,7 @@ fn slash_validator_redelegation<S>(
 where
     S: StorageRead,
 {
-    tracing::debug!("\nSLASHING VAL REDELEGATIONS\n");
+    // tracing::debug!("\nSLASHING VAL REDELEGATIONS\n");
     let infraction_epoch =
         current_epoch - params.slash_processing_epoch_offset();
 
@@ -4821,9 +4827,12 @@ where
         );
 
         init_tot_unbonded = updated_total_unbonded;
-        let map_value = slashed_amounts.entry(epoch).or_default();
-        // dbg!(&map_value);
-        *map_value += cmp::min(slashed, slashable_stake).change();
+        let to_slash = cmp::min(slashed, slashable_stake).change();
+        if !to_slash.is_zero() {
+            let map_value = slashed_amounts.entry(epoch).or_default();
+            // dbg!(&map_value);
+            *map_value += to_slash;
+        }
     }
     // dbg!(&slashed_amounts);
 
