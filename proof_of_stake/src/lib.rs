@@ -1989,17 +1989,15 @@ where
                 )?;
 
                 // total redelegated unbonded
-                if !is_redelegation {
-                    let unbonded_sub_map = total_redelegated_unbonded
-                        .at(&pipeline_epoch)
-                        .at(redelegation_start_epoch)
-                        .at(src_validator);
-                    unbonded_sub_map.update(
-                        storage,
-                        *bond_start_epoch,
-                        |current| current.unwrap_or_default() + *change,
-                    )?;
-                }
+                let unbonded_sub_map = total_redelegated_unbonded
+                    .at(&pipeline_epoch)
+                    .at(redelegation_start_epoch)
+                    .at(src_validator);
+                unbonded_sub_map.update(
+                    storage,
+                    *bond_start_epoch,
+                    |current| current.unwrap_or_default() + *change,
+                )?;
             }
         }
     }
