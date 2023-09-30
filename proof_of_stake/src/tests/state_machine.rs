@@ -1261,6 +1261,43 @@ impl ConcretePosState {
             .collect_map(&self.s)
             .unwrap();
         assert_eq!(abs_unbonds, conc_unbonds);
+
+        // Check the delegator redelegated unbonds
+        #[allow(clippy::type_complexity)]
+        let mut abs_del_redel_unbonds: BTreeMap<
+            Epoch,
+            BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Change>>>,
+        > = BTreeMap::new();
+        ref_state
+            .delegator_redelegated_unbonded
+            .get(&id.source)
+            .cloned()
+            .unwrap_or_default()
+            .get(&id.validator)
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .for_each(|((redel_end_epoch, withdraw_epoch), inner)| {
+                let abs_map = abs_del_redel_unbonds
+                    .entry(*redel_end_epoch)
+                    .or_default()
+                    .entry(*withdraw_epoch)
+                    .or_default();
+                for (src, bonds) in inner {
+                    for (start, amount) in bonds {
+                        abs_map
+                            .entry(src.clone())
+                            .or_default()
+                            .insert(*start, amount.change());
+                    }
+                }
+            });
+        let conc_del_redel_unbonds =
+            crate::delegator_redelegated_unbonds_handle(&id.source)
+                .at(&id.validator)
+                .collect_map(&self.s)
+                .unwrap();
+        assert_eq!(abs_del_redel_unbonds, conc_del_redel_unbonds);
     }
 
     fn check_init_validator_post_conditions(
@@ -1504,7 +1541,8 @@ impl ConcretePosState {
         };
 
         // Check the src bonds
-        let abs_src_bonds = ref_state.bonds.get(&src_id).cloned().unwrap();
+        let abs_src_bonds =
+            ref_state.bonds.get(&src_id).cloned().unwrap_or_default();
         let conc_src_bonds = crate::bond_handle(delegator, src_validator)
             .get_data_handler()
             .collect_map(&self.s)
@@ -1512,7 +1550,8 @@ impl ConcretePosState {
         assert_eq!(abs_src_bonds, conc_src_bonds);
 
         // Check the dest bonds
-        let abs_dest_bonds = ref_state.bonds.get(&dest_id).cloned().unwrap();
+        let abs_dest_bonds =
+            ref_state.bonds.get(&dest_id).cloned().unwrap_or_default();
         let conc_dest_bonds = crate::bond_handle(delegator, dest_validator)
             .get_data_handler()
             .collect_map(&self.s)
@@ -1520,8 +1559,11 @@ impl ConcretePosState {
         assert_eq!(abs_dest_bonds, conc_dest_bonds);
 
         // Check the src total bonded
-        let abs_src_tot_bonded =
-            ref_state.total_bonded.get(src_validator).cloned().unwrap();
+        let abs_src_tot_bonded = ref_state
+            .total_bonded
+            .get(src_validator)
+            .cloned()
+            .unwrap_or_default();
         let conc_src_tot_bonded = crate::total_bonded_handle(src_validator)
             .get_data_handler()
             .collect_map(&self.s)
@@ -1529,8 +1571,11 @@ impl ConcretePosState {
         assert_eq!(abs_src_tot_bonded, conc_src_tot_bonded);
 
         // Check the dest total bonded
-        let abs_dest_tot_bonded =
-            ref_state.total_bonded.get(dest_validator).cloned().unwrap();
+        let abs_dest_tot_bonded = ref_state
+            .total_bonded
+            .get(dest_validator)
+            .cloned()
+            .unwrap_or_default();
         let conc_dest_tot_bonded = crate::total_bonded_handle(dest_validator)
             .get_data_handler()
             .collect_map(&self.s)
@@ -1544,7 +1589,7 @@ impl ConcretePosState {
             .total_unbonded
             .get(src_validator)
             .cloned()
-            .unwrap();
+            .unwrap_or_default();
         abs_src_total_unbonded.retain(|_, inner_map| {
             inner_map.retain(|_, value| !value.is_zero());
             !inner_map.is_empty()
@@ -2411,8 +2456,15 @@ impl ReferenceStateMachine for AbstractPosState {
             Transition::Withdraw { id } => {
                 tracing::debug!("\nABSTRACT Withdraw, id = {}", id);
 
+                let redel_unbonds = state
+                    .delegator_redelegated_unbonded
+                    .entry(id.source.clone())
+                    .or_default()
+                    .entry(id.validator.clone())
+                    .or_default();
+
                 // Remove all withdrawable unbonds with this bond ID
-                for ((_start_epoch, withdraw_epoch), unbonds) in
+                for ((start_epoch, withdraw_epoch), unbonds) in
                     state.unbonds.iter_mut()
                 {
                     // let redelegated_unbonds = state
@@ -2425,10 +2477,14 @@ impl ReferenceStateMachine for AbstractPosState {
                     //     .or_default();
                     if *withdraw_epoch <= state.epoch {
                         unbonds.remove(id);
+                        redel_unbonds.remove(&(*start_epoch, *withdraw_epoch));
                     }
                 }
                 // Remove any epochs that have no unbonds left
                 state.unbonds.retain(|_epochs, unbonds| !unbonds.is_empty());
+
+                // Remove the redel unbonds if empty now
+                redel_unbonds.retain(|_epochs, unbonds| !unbonds.is_empty());
 
                 // TODO: should we do anything here for slashing?
             }
@@ -3472,9 +3528,9 @@ impl AbstractPosState {
                 //     "\n New redel entry for epoch {} -> amount {}",
                 //     bond_epoch, new_bond_amount
                 // );
-                let cur_bond_amount =
-                    bonds.get(&bond_epoch).cloned().unwrap_or_default();
                 if delegator_redelegated_bonds.contains_key(&bond_epoch) {
+                    let cur_bond_amount =
+                        bonds.get(&bond_epoch).cloned().unwrap_or_default();
                     Self::compute_modified_redelegation(
                         delegator_redelegated_bonds,
                         bond_epoch,
@@ -3728,10 +3784,10 @@ impl AbstractPosState {
         let pipeline_epoch = self.pipeline();
 
         // `resultUnbond`
-        let result_slashing = self.unbond_tokens(id, change, true);
+        let result_unbond = self.unbond_tokens(id, change, true);
 
         // `amountAfterSlashing`
-        let amount_after_slashing = result_slashing.sum.change();
+        let amount_after_slashing = result_unbond.sum.change();
         debug_assert!(amount_after_slashing.non_negative());
 
         // `updatedRedelegatedBonds`
@@ -3746,7 +3802,7 @@ impl AbstractPosState {
             .or_default()
             .entry(id.validator.clone())
             .or_default();
-        for (start_epoch, bonded) in &result_slashing.epoch_map {
+        for (start_epoch, bonded) in &result_unbond.epoch_map {
             *delegator_redelegated_bonded
                 .entry(*start_epoch)
                 .or_default() += (*bonded).into();
@@ -3783,7 +3839,7 @@ impl AbstractPosState {
             .or_default()
             .entry(new_validator.clone())
             .or_default();
-        for (start_epoch, bonded) in &result_slashing.epoch_map {
+        for (start_epoch, bonded) in &result_unbond.epoch_map {
             let cur_outgoing = outgoing_redelegations
                 .entry((*start_epoch, self.epoch))
                 .or_default();
@@ -3792,7 +3848,7 @@ impl AbstractPosState {
 
         // `updatedDestValidator` --> `with("totalRedelegatedBonded")`
         // Update the dest validator's total redelegated bonded
-        let total_redelegated_bonded = self
+        let dest_total_redelegated_bonded = self
             .validator_total_redelegated_bonded
             .entry(new_validator.clone())
             .or_default()
@@ -3800,9 +3856,10 @@ impl AbstractPosState {
             .or_default()
             .entry(id.validator.clone())
             .or_default();
-        for (start_epoch, bonded) in &result_slashing.epoch_map {
-            let cur_tot_bonded =
-                total_redelegated_bonded.entry(*start_epoch).or_default();
+        for (start_epoch, bonded) in &result_unbond.epoch_map {
+            let cur_tot_bonded = dest_total_redelegated_bonded
+                .entry(*start_epoch)
+                .or_default();
             *cur_tot_bonded += *bonded;
         }
 
@@ -6043,7 +6100,7 @@ impl AbstractPosState {
             delegator_redelegated_bonds.entry(bond_epoch).or_default();
         let (src_validators, total_redelegated) =
             redelegated_bonds.iter().fold(
-                (HashSet::<Address>::new(), token::Change::zero()),
+                (BTreeSet::<Address>::new(), token::Change::zero()),
                 |mut acc, (src_val, redel_bonds)| {
                     acc.0.insert(src_val.clone());
                     acc.1 += redel_bonds

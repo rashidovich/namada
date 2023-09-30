@@ -1943,9 +1943,9 @@ where
                 .at(&withdrawable_epoch);
 
             // Update the delegator's redelegated unbonds with the change
-            for (validator, redelegated_unbonds) in unbonds {
+            for (src_validator, redelegated_unbonds) in unbonds {
                 let redelegated_unbonded =
-                    this_redelegated_unbonded.at(validator);
+                    this_redelegated_unbonded.at(src_validator);
                 for (&redelegation_epoch, &change) in redelegated_unbonds {
                     redelegated_unbonded.update(
                         storage,
@@ -5732,12 +5732,12 @@ where
         })?;
     }
 
-    // Add a bond delta to the destination.
     if tracing::level_enabled!(tracing::Level::DEBUG) {
         let bonds = find_bonds(storage, delegator, dest_validator)?;
         tracing::debug!("\nRedeleg dest bonds before incrementing: {bonds:#?}");
     }
 
+    // Add a bond delta to the destination.
     if !amount_after_slashing.is_zero() {
         // `updatedDelegator` with updates to `bonded`
         let bond_handle = bond_handle(delegator, dest_validator);
