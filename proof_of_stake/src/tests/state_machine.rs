@@ -8,7 +8,7 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use namada_core::ledger::storage::testing::TestWlStorage;
 use namada_core::ledger::storage_api::collections::lazy_map::{
-    Collectable, NestedSubKey,
+    Collectable, NestedSubKey, SubKey,
 };
 use namada_core::ledger::storage_api::token::read_balance;
 use namada_core::ledger::storage_api::{token, StorageRead};
@@ -38,11 +38,9 @@ use crate::{
     below_capacity_validator_set_handle, consensus_validator_set_handle,
     enqueued_slashes_handle, read_below_threshold_validator_set_addresses,
     read_pos_params, redelegate_tokens, validator_deltas_handle,
-    validator_incoming_redelegations_handle,
-    validator_outgoing_redelegations_handle, validator_slashes_handle,
-    validator_state_handle, BondsForRemovalRes, EagerRedelegatedUnbonds,
-    FoldRedelegatedBondsResult, ModifiedRedelegation, RedelegationError,
-    ResultSlashing,
+    validator_slashes_handle, validator_state_handle, BondsForRemovalRes,
+    EagerRedelegatedUnbonds, FoldRedelegatedBondsResult, ModifiedRedelegation,
+    RedelegationError, ResultSlashing,
 };
 
 prop_state_machine! {
@@ -365,13 +363,7 @@ impl StateMachineTest for ConcretePosState {
                     src_balance_pre - src_balance_post
                 );
 
-                // Check that the bonds are the same
-                let abs_bonds = ref_state.bonds.get(&id).cloned().unwrap();
-                let conc_bonds = crate::bond_handle(&id.source, &id.validator)
-                    .get_data_handler()
-                    .collect_map(&state.s)
-                    .unwrap();
-                assert_eq!(abs_bonds, conc_bonds);
+                state.check_multistate_bond_post_conditions(ref_state, &id);
             }
             Transition::Unbond { id, amount } => {
                 tracing::debug!("\nCONCRETE Unbond");
@@ -434,31 +426,7 @@ impl StateMachineTest for ConcretePosState {
                 // Post-condition: Source balance should not change
                 assert_eq!(src_balance_post, src_balance_pre);
 
-                // Check that the bonds are the same
-                let abs_bonds = ref_state.bonds.get(&id).cloned().unwrap();
-                let conc_bonds = crate::bond_handle(&id.source, &id.validator)
-                    .get_data_handler()
-                    .collect_map(&state.s)
-                    .unwrap();
-                assert_eq!(abs_bonds, conc_bonds);
-
-                // Check that the unbond records are the same
-                // TODO: figure out how we get entries with 0 amount in the
-                // abstract version (and prevent)
-                let mut abs_total_unbonded = ref_state
-                    .total_unbonded
-                    .get(&id.validator)
-                    .cloned()
-                    .unwrap();
-                abs_total_unbonded.retain(|_, inner_map| {
-                    inner_map.retain(|_, value| !value.is_zero());
-                    !inner_map.is_empty()
-                });
-                let conc_total_unbonded =
-                    crate::total_unbonded_handle(&id.validator)
-                        .collect_map(&state.s)
-                        .unwrap();
-                assert_eq!(abs_total_unbonded, conc_total_unbonded);
+                state.check_multistate_unbond_post_conditions(ref_state, &id);
             }
             Transition::Withdraw {
                 id: BondId { source, validator },
@@ -509,6 +477,11 @@ impl StateMachineTest for ConcretePosState {
                 // Post-condition: The increment in source balance should be
                 // equal to the withdrawn amount
                 assert_eq!(src_balance_post - src_balance_pre, withdrawn);
+
+                state.check_multistate_withdraw_post_conditions(
+                    ref_state,
+                    &BondId { source, validator },
+                );
             }
             Transition::Redelegate {
                 is_chained,
@@ -580,86 +553,12 @@ impl StateMachineTest for ConcretePosState {
                     amount,
                 );
 
-                let conc_incoming_src =
-                    validator_incoming_redelegations_handle(&id.validator)
-                        .collect_map(&state.s)
-                        .unwrap();
-                let conc_incoming_dest =
-                    validator_incoming_redelegations_handle(&new_validator)
-                        .collect_map(&state.s)
-                        .unwrap();
-                let conc_outgoing_src =
-                    validator_outgoing_redelegations_handle(&id.validator)
-                        .collect_map(&state.s)
-                        .unwrap();
-                let conc_outgoing_dest =
-                    validator_outgoing_redelegations_handle(&new_validator)
-                        .collect_map(&state.s)
-                        .unwrap();
-
-                let abs_src_incoming = ref_state
-                    .incoming_redelegations
-                    .get(&id.validator)
-                    .cloned()
-                    .unwrap_or_default();
-                let abs_dest_incoming = ref_state
-                    .incoming_redelegations
-                    .get(&new_validator)
-                    .cloned()
-                    .unwrap_or_default();
-                let abs_src_outgoing = ref_state
-                    .outgoing_redelegations
-                    .get(&id.validator)
-                    .cloned()
-                    .unwrap_or_default();
-                let abs_dest_outgoing = ref_state
-                    .outgoing_redelegations
-                    .get(&new_validator)
-                    .cloned()
-                    .unwrap_or_default();
-
-                for (del, epoch) in conc_incoming_src {
-                    assert_eq!(
-                        abs_src_incoming.get(&del).cloned().unwrap(),
-                        epoch
-                    );
-                }
-                for (del, epoch) in conc_incoming_dest {
-                    assert_eq!(
-                        abs_dest_incoming.get(&del).cloned().unwrap(),
-                        epoch
-                    );
-                }
-
-                for (dest, map) in conc_outgoing_src {
-                    for (bond_start, redel_map) in map {
-                        for (redel_start, amount) in redel_map {
-                            let a = abs_src_outgoing.get(&dest).unwrap();
-                            // dbg!(&a);
-                            assert_eq!(
-                                a.get(&(bond_start, redel_start))
-                                    .cloned()
-                                    .unwrap(),
-                                amount
-                            );
-                        }
-                    }
-                }
-                for (dest, map) in conc_outgoing_dest {
-                    for (bond_start, redel_map) in map {
-                        for (redel_start, amount) in redel_map {
-                            assert_eq!(
-                                abs_dest_outgoing
-                                    .get(&dest)
-                                    .unwrap()
-                                    .get(&(bond_start, redel_start))
-                                    .cloned()
-                                    .unwrap(),
-                                amount
-                            );
-                        }
-                    }
-                }
+                state.check_multistate_redelegation_post_conditions(
+                    ref_state,
+                    &id.source,
+                    &id.validator,
+                    &new_validator,
+                );
 
                 if is_chained && !amount.is_zero() {
                     assert!(result.is_err());
@@ -822,7 +721,7 @@ impl StateMachineTest for ConcretePosState {
                     &address,
                 );
 
-                // TODO: Any others?
+                state.check_multistate_misbehavior_post_conditions(ref_state);
             }
             Transition::UnjailValidator { address } => {
                 tracing::debug!("\nCONCRETE UnjailValidator");
@@ -974,6 +873,29 @@ impl ConcretePosState {
         );
     }
 
+    fn check_multistate_bond_post_conditions(
+        &self,
+        ref_state: &AbstractPosState,
+        id: &BondId,
+    ) {
+        // Check that the bonds are the same
+        let abs_bonds = ref_state.bonds.get(id).cloned().unwrap();
+        let conc_bonds = crate::bond_handle(&id.source, &id.validator)
+            .get_data_handler()
+            .collect_map(&self.s)
+            .unwrap();
+        assert_eq!(abs_bonds, conc_bonds);
+
+        // Check that the total bonded is the same
+        let abs_tot_bonded =
+            ref_state.total_bonded.get(&id.validator).cloned().unwrap();
+        let conc_tot_bonded = crate::total_bonded_handle(&id.validator)
+            .get_data_handler()
+            .collect_map(&self.s)
+            .unwrap();
+        assert_eq!(abs_tot_bonded, conc_tot_bonded);
+    }
+
     fn check_unbond_post_conditions(
         &self,
         submit_epoch: Epoch,
@@ -1024,6 +946,187 @@ impl ConcretePosState {
             id,
             stake_at_pipeline,
         );
+    }
+
+    fn check_multistate_unbond_post_conditions(
+        &self,
+        ref_state: &AbstractPosState,
+        id: &BondId,
+    ) {
+        // Check that the bonds are the same
+        let abs_bonds = ref_state.bonds.get(id).cloned().unwrap();
+        let conc_bonds = crate::bond_handle(&id.source, &id.validator)
+            .get_data_handler()
+            .collect_map(&self.s)
+            .unwrap();
+        assert_eq!(abs_bonds, conc_bonds);
+
+        // Check that the total bonded is the same
+        let abs_tot_bonded =
+            ref_state.total_bonded.get(&id.validator).cloned().unwrap();
+        let conc_tot_bonded = crate::total_bonded_handle(&id.validator)
+            .get_data_handler()
+            .collect_map(&self.s)
+            .unwrap();
+        assert_eq!(abs_tot_bonded, conc_tot_bonded);
+
+        // Check that the unbonds are the same
+        let mut abs_unbonds: BTreeMap<Epoch, BTreeMap<Epoch, token::Amount>> =
+            BTreeMap::new();
+        ref_state.unbonds.iter().for_each(
+            |((start_epoch, withdraw_epoch), inner)| {
+                let amount = inner.get(id).cloned().unwrap_or_default();
+                if !amount.is_zero() {
+                    abs_unbonds
+                        .entry(*start_epoch)
+                        .or_default()
+                        .insert(*withdraw_epoch, amount);
+                }
+            },
+        );
+        let conc_unbonds = crate::unbond_handle(&id.source, &id.validator)
+            .collect_map(&self.s)
+            .unwrap();
+        assert_eq!(abs_unbonds, conc_unbonds);
+
+        // Check that the total_unbonded are the same
+        // TODO: figure out how we get entries with 0 amount in the
+        // abstract version (and prevent)
+        let mut abs_total_unbonded = ref_state
+            .total_unbonded
+            .get(&id.validator)
+            .cloned()
+            .unwrap();
+        abs_total_unbonded.retain(|_, inner_map| {
+            inner_map.retain(|_, value| !value.is_zero());
+            !inner_map.is_empty()
+        });
+        let conc_total_unbonded = crate::total_unbonded_handle(&id.validator)
+            .collect_map(&self.s)
+            .unwrap();
+        assert_eq!(abs_total_unbonded, conc_total_unbonded);
+
+        // Check that the delegator redelegated bonds are the same
+        let abs_del_redel_bonds = ref_state
+            .delegator_redelegated_bonded
+            .get(&id.source)
+            .cloned()
+            .unwrap_or_default()
+            .get(&id.validator)
+            .cloned()
+            .unwrap_or_default();
+        let conc_del_redel_bonds =
+            crate::delegator_redelegated_bonds_handle(&id.source)
+                .at(&id.validator)
+                .collect_map(&self.s)
+                .unwrap();
+        assert_eq!(abs_del_redel_bonds, conc_del_redel_bonds);
+
+        // Check that the delegator redelegated unbonds are the same
+        #[allow(clippy::type_complexity)]
+        let mut abs_del_redel_unbonds: BTreeMap<
+            Epoch,
+            BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Change>>>,
+        > = BTreeMap::new();
+        ref_state
+            .delegator_redelegated_unbonded
+            .get(&id.source)
+            .cloned()
+            .unwrap_or_default()
+            .get(&id.validator)
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .for_each(|((redel_end_epoch, withdraw_epoch), inner)| {
+                let abs_map = abs_del_redel_unbonds
+                    .entry(*redel_end_epoch)
+                    .or_default()
+                    .entry(*withdraw_epoch)
+                    .or_default();
+                for (src, bonds) in inner {
+                    for (start, amount) in bonds {
+                        abs_map
+                            .entry(src.clone())
+                            .or_default()
+                            .insert(*start, amount.change());
+                    }
+                }
+            });
+        let conc_del_redel_unbonds =
+            crate::delegator_redelegated_unbonds_handle(&id.source)
+                .at(&id.validator)
+                .collect_map(&self.s)
+                .unwrap();
+        assert_eq!(abs_del_redel_unbonds, conc_del_redel_unbonds);
+
+        // Check the validator total redelegated bonded
+        let abs_total_redel_bonded = ref_state
+            .validator_total_redelegated_bonded
+            .get(&id.validator)
+            .cloned()
+            .unwrap_or_default();
+        let mut conc_total_redel_bonded: BTreeMap<
+            Epoch,
+            BTreeMap<Address, BTreeMap<Epoch, token::Amount>>,
+        > = BTreeMap::new();
+        crate::validator_total_redelegated_bonded_handle(&id.validator)
+            .iter(&self.s)
+            .unwrap()
+            .for_each(|res| {
+                let (
+                    NestedSubKey::Data {
+                        key: redel_end_epoch,
+                        nested_sub_key:
+                            NestedSubKey::Data {
+                                key: src_val,
+                                nested_sub_key: SubKey::Data(bond_start),
+                            },
+                    },
+                    amount,
+                ) = res.unwrap();
+                conc_total_redel_bonded
+                    .entry(redel_end_epoch)
+                    .or_default()
+                    .entry(src_val)
+                    .or_default()
+                    .insert(bond_start, token::Amount::from(amount));
+            });
+        assert_eq!(abs_total_redel_bonded, conc_total_redel_bonded);
+
+        // Check the validator total redelegated unbonded
+        #[allow(clippy::type_complexity)]
+        let mut abs_total_redel_unbonded: BTreeMap<
+            Epoch,
+            BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Change>>>,
+        > = BTreeMap::new();
+        ref_state
+            .validator_total_redelegated_unbonded
+            .get(&id.validator)
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .for_each(|(redel_end_epoch, inner)| {
+                for (withdraw_epoch, rbonds) in inner {
+                    for (src, bonds) in rbonds {
+                        for (start, amount) in bonds {
+                            let inner_map = abs_total_redel_unbonded
+                                .entry(*redel_end_epoch)
+                                .or_default()
+                                .entry(*withdraw_epoch)
+                                .or_default()
+                                .entry(src.clone())
+                                .or_default();
+                            inner_map.insert(*start, amount.change());
+                        }
+                    }
+                }
+            });
+
+        let conc_total_redel_unbonded =
+            crate::validator_total_redelegated_unbonded_handle(&id.validator)
+                .collect_map(&self.s)
+                .unwrap();
+        assert_eq!(abs_total_redel_unbonded, conc_total_redel_unbonded);
     }
 
     /// These post-conditions apply to bonding and unbonding
@@ -1133,6 +1236,31 @@ impl ConcretePosState {
                 );
             }
         }
+    }
+
+    fn check_multistate_withdraw_post_conditions(
+        &self,
+        ref_state: &AbstractPosState,
+        id: &BondId,
+    ) {
+        // Check that the unbonds are the same
+        let mut abs_unbonds: BTreeMap<Epoch, BTreeMap<Epoch, token::Amount>> =
+            BTreeMap::new();
+        ref_state.unbonds.iter().for_each(
+            |((start_epoch, withdraw_epoch), inner)| {
+                let amount = inner.get(id).cloned().unwrap_or_default();
+                if !amount.is_zero() {
+                    abs_unbonds
+                        .entry(*start_epoch)
+                        .or_default()
+                        .insert(*withdraw_epoch, amount);
+                }
+            },
+        );
+        let conc_unbonds = crate::unbond_handle(&id.source, &id.validator)
+            .collect_map(&self.s)
+            .unwrap();
+        assert_eq!(abs_unbonds, conc_unbonds);
     }
 
     fn check_init_validator_post_conditions(
@@ -1252,6 +1380,40 @@ impl ConcretePosState {
         // TODO: Any others?
     }
 
+    fn check_multistate_misbehavior_post_conditions(
+        &self,
+        ref_state: &AbstractPosState,
+    ) {
+        // Check the enqueued slashes
+        let abs_enqueued = ref_state.enqueued_slashes.clone();
+        let mut conc_enqueued: BTreeMap<Epoch, BTreeMap<Address, Vec<Slash>>> =
+            BTreeMap::new();
+        crate::enqueued_slashes_handle()
+            .get_data_handler()
+            .iter(&self.s)
+            .unwrap()
+            .for_each(|res| {
+                let (
+                    NestedSubKey::Data {
+                        key: epoch,
+                        nested_sub_key:
+                            NestedSubKey::Data {
+                                key: address,
+                                nested_sub_key: _,
+                            },
+                    },
+                    slash,
+                ) = res.unwrap();
+                let slashes = conc_enqueued
+                    .entry(epoch)
+                    .or_default()
+                    .entry(address)
+                    .or_default();
+                slashes.push(slash);
+            });
+        assert_eq!(abs_enqueued, conc_enqueued);
+    }
+
     fn check_unjail_validator_post_conditions(
         &self,
         params: &PosParams,
@@ -1325,6 +1487,251 @@ impl ConcretePosState {
         );
     }
 
+    fn check_multistate_redelegation_post_conditions(
+        &self,
+        ref_state: &AbstractPosState,
+        delegator: &Address,
+        src_validator: &Address,
+        dest_validator: &Address,
+    ) {
+        let src_id = BondId {
+            source: delegator.clone(),
+            validator: src_validator.clone(),
+        };
+        let dest_id = BondId {
+            source: delegator.clone(),
+            validator: dest_validator.clone(),
+        };
+
+        // Check the src bonds
+        let abs_src_bonds = ref_state.bonds.get(&src_id).cloned().unwrap();
+        let conc_src_bonds = crate::bond_handle(delegator, src_validator)
+            .get_data_handler()
+            .collect_map(&self.s)
+            .unwrap();
+        assert_eq!(abs_src_bonds, conc_src_bonds);
+
+        // Check the dest bonds
+        let abs_dest_bonds = ref_state.bonds.get(&dest_id).cloned().unwrap();
+        let conc_dest_bonds = crate::bond_handle(delegator, dest_validator)
+            .get_data_handler()
+            .collect_map(&self.s)
+            .unwrap();
+        assert_eq!(abs_dest_bonds, conc_dest_bonds);
+
+        // Check the src total bonded
+        let abs_src_tot_bonded =
+            ref_state.total_bonded.get(src_validator).cloned().unwrap();
+        let conc_src_tot_bonded = crate::total_bonded_handle(src_validator)
+            .get_data_handler()
+            .collect_map(&self.s)
+            .unwrap();
+        assert_eq!(abs_src_tot_bonded, conc_src_tot_bonded);
+
+        // Check the dest total bonded
+        let abs_dest_tot_bonded =
+            ref_state.total_bonded.get(dest_validator).cloned().unwrap();
+        let conc_dest_tot_bonded = crate::total_bonded_handle(dest_validator)
+            .get_data_handler()
+            .collect_map(&self.s)
+            .unwrap();
+        assert_eq!(abs_dest_tot_bonded, conc_dest_tot_bonded);
+
+        // NOTE: Unbonds are not updated by redelegation
+
+        // Check the src total_unbonded
+        let mut abs_src_total_unbonded = ref_state
+            .total_unbonded
+            .get(src_validator)
+            .cloned()
+            .unwrap();
+        abs_src_total_unbonded.retain(|_, inner_map| {
+            inner_map.retain(|_, value| !value.is_zero());
+            !inner_map.is_empty()
+        });
+        let conc_src_total_unbonded =
+            crate::total_unbonded_handle(src_validator)
+                .collect_map(&self.s)
+                .unwrap();
+        assert_eq!(abs_src_total_unbonded, conc_src_total_unbonded);
+
+        // Check the delegator redelegated bonds to the src
+        let abs_del_redel_bonds_src = ref_state
+            .delegator_redelegated_bonded
+            .get(delegator)
+            .cloned()
+            .unwrap_or_default()
+            .get(src_validator)
+            .cloned()
+            .unwrap_or_default();
+        let conc_del_redel_bonds_src =
+            crate::delegator_redelegated_bonds_handle(delegator)
+                .at(src_validator)
+                .collect_map(&self.s)
+                .unwrap();
+        assert_eq!(abs_del_redel_bonds_src, conc_del_redel_bonds_src);
+
+        // Check the delegator redelegated bonds to the dest
+        let abs_del_redel_bonds_dest = ref_state
+            .delegator_redelegated_bonded
+            .get(delegator)
+            .cloned()
+            .unwrap_or_default()
+            .get(dest_validator)
+            .cloned()
+            .unwrap_or_default();
+        let conc_del_redel_bonds_dest =
+            crate::delegator_redelegated_bonds_handle(delegator)
+                .at(dest_validator)
+                .collect_map(&self.s)
+                .unwrap();
+        assert_eq!(abs_del_redel_bonds_dest, conc_del_redel_bonds_dest);
+
+        // NOTE: Delegator redelegated unbonds are not updated by redelegation
+
+        // Check the src total redelegated bonded
+        let abs_src_total_redel_bonded = ref_state
+            .validator_total_redelegated_bonded
+            .get(src_validator)
+            .cloned()
+            .unwrap_or_default();
+        let mut conc_src_total_redel_bonded: BTreeMap<
+            Epoch,
+            BTreeMap<Address, BTreeMap<Epoch, token::Amount>>,
+        > = BTreeMap::new();
+        crate::validator_total_redelegated_bonded_handle(src_validator)
+            .iter(&self.s)
+            .unwrap()
+            .for_each(|res| {
+                let (
+                    NestedSubKey::Data {
+                        key: redel_end_epoch,
+                        nested_sub_key:
+                            NestedSubKey::Data {
+                                key: src_val,
+                                nested_sub_key: SubKey::Data(bond_start),
+                            },
+                    },
+                    amount,
+                ) = res.unwrap();
+                conc_src_total_redel_bonded
+                    .entry(redel_end_epoch)
+                    .or_default()
+                    .entry(src_val)
+                    .or_default()
+                    .insert(bond_start, token::Amount::from(amount));
+            });
+        assert_eq!(abs_src_total_redel_bonded, conc_src_total_redel_bonded);
+
+        // Check the dest total redelegated bonded
+        let abs_dest_total_redel_bonded = ref_state
+            .validator_total_redelegated_bonded
+            .get(dest_validator)
+            .cloned()
+            .unwrap_or_default();
+        let mut conc_dest_total_redel_bonded: BTreeMap<
+            Epoch,
+            BTreeMap<Address, BTreeMap<Epoch, token::Amount>>,
+        > = BTreeMap::new();
+        crate::validator_total_redelegated_bonded_handle(dest_validator)
+            .iter(&self.s)
+            .unwrap()
+            .for_each(|res| {
+                let (
+                    NestedSubKey::Data {
+                        key: redel_end_epoch,
+                        nested_sub_key:
+                            NestedSubKey::Data {
+                                key: src_val,
+                                nested_sub_key: SubKey::Data(bond_start),
+                            },
+                    },
+                    amount,
+                ) = res.unwrap();
+                conc_dest_total_redel_bonded
+                    .entry(redel_end_epoch)
+                    .or_default()
+                    .entry(src_val)
+                    .or_default()
+                    .insert(bond_start, token::Amount::from(amount));
+            });
+        assert_eq!(abs_dest_total_redel_bonded, conc_dest_total_redel_bonded);
+
+        // Check the src validator's total redelegated unbonded
+        #[allow(clippy::type_complexity)]
+        let mut abs_src_total_redel_unbonded: BTreeMap<
+            Epoch,
+            BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Change>>>,
+        > = BTreeMap::new();
+        ref_state
+            .validator_total_redelegated_unbonded
+            .get(src_validator)
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .for_each(|(redel_end_epoch, inner)| {
+                for (withdraw_epoch, rbonds) in inner {
+                    for (src, bonds) in rbonds {
+                        for (start, amount) in bonds {
+                            let inner_map = abs_src_total_redel_unbonded
+                                .entry(*redel_end_epoch)
+                                .or_default()
+                                .entry(*withdraw_epoch)
+                                .or_default()
+                                .entry(src.clone())
+                                .or_default();
+                            inner_map.insert(*start, amount.change());
+                        }
+                    }
+                }
+            });
+
+        let conc_src_total_redel_unbonded =
+            crate::validator_total_redelegated_unbonded_handle(src_validator)
+                .collect_map(&self.s)
+                .unwrap();
+        assert_eq!(abs_src_total_redel_unbonded, conc_src_total_redel_unbonded);
+
+        // Check the src validator's outgoing redelegations
+        let mut abs_src_outgoing: BTreeMap<
+            Address,
+            BTreeMap<Epoch, BTreeMap<Epoch, token::Amount>>,
+        > = BTreeMap::new();
+        ref_state
+            .outgoing_redelegations
+            .get(src_validator)
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .for_each(|(address, amounts)| {
+                for ((bond_start, redel_start), amount) in amounts {
+                    abs_src_outgoing
+                        .entry(address.clone())
+                        .or_default()
+                        .entry(*bond_start)
+                        .or_default()
+                        .insert(*redel_start, *amount);
+                }
+            });
+        let conc_src_outgoing =
+            crate::validator_outgoing_redelegations_handle(src_validator)
+                .collect_map(&self.s)
+                .unwrap();
+        assert_eq!(abs_src_outgoing, conc_src_outgoing);
+
+        // Check the dest validator's incoming redelegations
+        let abs_dest_incoming = ref_state
+            .incoming_redelegations
+            .get(dest_validator)
+            .cloned()
+            .unwrap_or_default();
+        let conc_dest_incoming =
+            crate::validator_incoming_redelegations_handle(dest_validator)
+                .collect_map(&self.s)
+                .unwrap();
+        assert_eq!(abs_dest_incoming, conc_dest_incoming);
+    }
+
     fn check_global_post_conditions(
         &self,
         params: &PosParams,
@@ -1337,33 +1744,6 @@ impl ConcretePosState {
         ) {
             tracing::debug!("Epoch {epoch}");
             let mut vals = HashSet::<Address>::new();
-
-            // Check consistency of all the bonds
-            for (id, abs_bonds) in &ref_state.bonds {
-                let conc_bonds = crate::bond_handle(&id.source, &id.validator)
-                    .get_data_handler()
-                    .collect_map(&self.s)
-                    .unwrap();
-
-                assert_eq!(abs_bonds.clone(), conc_bonds);
-            }
-
-            // Check consistency of outgoing redelegations
-            for (src_validator, map1) in &ref_state.outgoing_redelegations {
-                for (dest_validator, map2) in map1 {
-                    for ((bond_start, redel_start), amount) in map2 {
-                        let conc =
-                            crate::validator_outgoing_redelegations_handle(
-                                src_validator,
-                            )
-                            .at(dest_validator)
-                            .at(bond_start)
-                            .get(&self.s, redel_start)
-                            .unwrap();
-                        assert_eq!(*amount, conc.unwrap_or_default());
-                    }
-                }
-            }
 
             // Consensus validators
             for WeightedValidator {
@@ -1417,30 +1797,6 @@ impl ConcretePosState {
                         .cloned()
                         .unwrap()
                 );
-
-                // Check total_bonded
-                let conc_total_bonded = crate::total_bonded_handle(&validator)
-                    .get_data_handler()
-                    .collect_map(&self.s)
-                    .unwrap();
-                let abs_total_bonded = ref_state
-                    .total_bonded
-                    .get(&validator)
-                    .cloned()
-                    .unwrap_or_default();
-                assert_eq!(conc_total_bonded, abs_total_bonded);
-
-                // Check total_unbonded
-                let conc_total_unbonded =
-                    crate::total_unbonded_handle(&validator)
-                        .collect_map(&self.s)
-                        .unwrap();
-                let abs_total_unbonded = ref_state
-                    .total_unbonded
-                    .get(&validator)
-                    .cloned()
-                    .unwrap_or_default();
-                assert_eq!(conc_total_unbonded, abs_total_unbonded);
 
                 assert!(!vals.contains(&validator));
                 vals.insert(validator);
@@ -1513,30 +1869,6 @@ impl ConcretePosState {
                         .unwrap()
                 );
 
-                // Check total_bonded
-                let conc_total_bonded = crate::total_bonded_handle(&validator)
-                    .get_data_handler()
-                    .collect_map(&self.s)
-                    .unwrap();
-                let abs_total_bonded = ref_state
-                    .total_bonded
-                    .get(&validator)
-                    .cloned()
-                    .unwrap_or_default();
-                assert_eq!(conc_total_bonded, abs_total_bonded);
-
-                // Check total_unbonded
-                let conc_total_unbonded =
-                    crate::total_unbonded_handle(&validator)
-                        .collect_map(&self.s)
-                        .unwrap();
-                let abs_total_unbonded = ref_state
-                    .total_unbonded
-                    .get(&validator)
-                    .cloned()
-                    .unwrap_or_default();
-                assert_eq!(conc_total_unbonded, abs_total_unbonded);
-
                 assert!(!vals.contains(&validator));
                 vals.insert(validator);
             }
@@ -1583,30 +1915,6 @@ impl ConcretePosState {
                         .cloned()
                         .unwrap()
                 );
-
-                // Check total_bonded
-                let conc_total_bonded = crate::total_bonded_handle(&validator)
-                    .get_data_handler()
-                    .collect_map(&self.s)
-                    .unwrap();
-                let abs_total_bonded = ref_state
-                    .total_bonded
-                    .get(&validator)
-                    .cloned()
-                    .unwrap_or_default();
-                assert_eq!(conc_total_bonded, abs_total_bonded);
-
-                // Check total_unbonded
-                let conc_total_unbonded =
-                    crate::total_unbonded_handle(&validator)
-                        .collect_map(&self.s)
-                        .unwrap();
-                let abs_total_unbonded = ref_state
-                    .total_unbonded
-                    .get(&validator)
-                    .cloned()
-                    .unwrap_or_default();
-                assert_eq!(conc_total_unbonded, abs_total_unbonded);
 
                 assert!(!vals.contains(&validator));
                 vals.insert(validator);
@@ -1663,31 +1971,6 @@ impl ConcretePosState {
                             .cloned()
                             .unwrap()
                     );
-
-                    // Check total_bonded
-                    let conc_total_bonded =
-                        crate::total_bonded_handle(&validator)
-                            .get_data_handler()
-                            .collect_map(&self.s)
-                            .unwrap();
-                    let abs_total_bonded = ref_state
-                        .total_bonded
-                        .get(&validator)
-                        .cloned()
-                        .unwrap_or_default();
-                    assert_eq!(conc_total_bonded, abs_total_bonded);
-
-                    // Check total_unbonded
-                    let conc_total_unbonded =
-                        crate::total_unbonded_handle(&validator)
-                            .collect_map(&self.s)
-                            .unwrap();
-                    let abs_total_unbonded = ref_state
-                        .total_unbonded
-                        .get(&validator)
-                        .cloned()
-                        .unwrap_or_default();
-                    assert_eq!(conc_total_unbonded, abs_total_unbonded);
 
                     assert!(!vals.contains(&validator));
                 }
@@ -4933,17 +5216,17 @@ impl AbstractPosState {
             tracing::debug!("OUTGOING REDELEGATIONS:");
         }
         for ((src_start_epoch, redel_start), amount) in outgoing_redelegations {
+            tracing::debug!(
+                "bond_start = {}, redel_start = {}",
+                src_start_epoch,
+                redel_start
+            );
             if self.params.in_redelegation_slashing_window(
                 infraction_epoch,
                 redel_start,
                 self.params.redelegation_end_epoch_from_start(redel_start),
             ) && src_start_epoch <= infraction_epoch
             {
-                tracing::debug!(
-                    "bond_start = {}, redel_start = {}",
-                    src_start_epoch,
-                    redel_start
-                );
                 self.slash_redelegation(
                     amount.change(),
                     src_start_epoch,
@@ -4972,8 +5255,11 @@ impl AbstractPosState {
         slash_amounts: &mut BTreeMap<Epoch, token::Change>,
     ) {
         tracing::debug!(
-            "\nSLASH REDELEGATION OF BOND START {bond_start} and \
-             redel_bond_start {redel_bond_start}\n"
+            "\nSLASH REDELEGATION AMOUNT {} - BOND START {} and \
+             redel_bond_start {}\n",
+            amount,
+            bond_start,
+            redel_bond_start
         );
         // dbg!(&slashes);
 
@@ -5097,9 +5383,9 @@ impl AbstractPosState {
                 slashable_amount,
             )
             .mul_ceil(slash_rate);
+            tracing::debug!("slashable stake = {}", slashable_stake);
 
             tot_unbonded = updated_total_unbonded;
-            tracing::debug!("slashable stake = {}", slashable_stake);
 
             let to_slash = cmp::min(slashed, slashable_stake);
             if !to_slash.is_zero() {

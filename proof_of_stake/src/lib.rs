@@ -4731,8 +4731,11 @@ where
     S: StorageRead,
 {
     tracing::debug!(
-        "\nSLASH REDELEGATION OF BOND START {bond_start} and redel_bond_start \
-         {redel_bond_start}\n"
+        "\nSLASH REDELEGATION AMOUNT {} - BOND START {} and redel_bond_start \
+         {}\n",
+        amount.to_string_native(),
+        bond_start,
+        redel_bond_start
     );
     // dbg!(&slashes.iter(storage)?.collect::<Vec<_>>());
 
@@ -4762,8 +4765,7 @@ where
                 .at(&epoch)
                 .at(&redel_bond_start)
                 .at(src_validator)
-                .get(storage, &bond_start)
-                .unwrap()
+                .get(storage, &bond_start)?
                 .unwrap_or_default();
             debug_assert!(redelegated_unbonded.non_negative());
             init_tot_unbonded + token::Amount::from_change(redelegated_unbonded)
@@ -4913,28 +4915,23 @@ where
         .iter_range(params.pipeline_len)
         .collect::<Vec<_>>();
     for epoch in eps.into_iter().rev() {
-        let amount =
-            tot_bonds
-                .keys()
-                .fold(token::Amount::zero(), |acc, bond_start| {
-                    acc + compute_slash_bond_at_epoch(
-                        storage,
-                        params,
-                        validator,
-                        epoch,
-                        infraction_epoch,
-                        *bond_start,
-                        token::Amount::from(
-                            tot_bonds
-                                .get(bond_start)
-                                .cloned()
-                                .unwrap_or_default(),
-                        ),
-                        redelegated_bonds.get(bond_start),
-                        slash_rate,
-                    )
-                    .unwrap()
-                });
+        let amount = tot_bonds.iter().fold(
+            token::Amount::zero(),
+            |acc, (bond_start, bond_amount)| {
+                acc + compute_slash_bond_at_epoch(
+                    storage,
+                    params,
+                    validator,
+                    epoch,
+                    infraction_epoch,
+                    *bond_start,
+                    token::Amount::from(*bond_amount),
+                    redelegated_bonds.get(bond_start),
+                    slash_rate,
+                )
+                .unwrap()
+            },
+        );
         let new_bonds = total_unbonded.at(&epoch);
         tot_bonds = new_bonds
             .collect_map(storage)
