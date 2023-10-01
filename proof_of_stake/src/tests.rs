@@ -66,8 +66,7 @@ use crate::{
     staking_token_address, store_total_consensus_stake, total_bonded_handle,
     total_deltas_handle, total_unbonded_handle, unbond_handle, unbond_tokens,
     unjail_validator, update_validator_deltas, update_validator_set,
-    validator_consensus_key_handle, validator_deltas_handle,
-    validator_incoming_redelegations_handle,
+    validator_consensus_key_handle, validator_incoming_redelegations_handle,
     validator_outgoing_redelegations_handle, validator_set_positions_handle,
     validator_set_update_tendermint, validator_slashes_handle,
     validator_state_handle, validator_total_redelegated_bonded_handle,
@@ -4205,335 +4204,392 @@ fn test_slash_validator() {
     let infraction_stake = token::Amount::from(23);
 
     let initial_stakes = BTreeMap::from_iter([
-        (Epoch(10), infraction_stake),
         (Epoch(11), infraction_stake),
         (Epoch(12), infraction_stake),
+        (Epoch(13), infraction_stake),
     ]);
+    let mut exp_res = initial_stakes.clone();
 
     let current_epoch = Epoch(10);
+    let infraction_epoch =
+        current_epoch - params.slash_processing_epoch_offset();
+    let processing_epoch = current_epoch.next();
     let slash_rate = Dec::one();
 
-    // Insert initial stake at epoch 0
-    validator_deltas_handle(&bob)
-        .set(&mut storage, infraction_stake.change(), Epoch::default(), 0)
-        .unwrap();
-
     // Test case 1
-    // There are no non-genesis bonds or slashes
     println!("\nTEST 1:");
+
+    total_bonded
+        .set(&mut storage, 23.into(), infraction_epoch - 2, 0)
+        .unwrap();
     let res = slash_validator(
         &storage,
         &params,
         &bob,
         slash_rate,
-        current_epoch,
+        processing_epoch,
         &Default::default(),
     )
     .unwrap();
-    assert_eq!(res, initial_stakes);
+    assert_eq!(res, exp_res);
 
     // Test case 2
-    // A bond to bob becomes active at current epoch
     println!("\nTEST 2:");
     total_bonded
-        .set(
-            &mut storage,
-            token::Amount::from(6),
-            current_epoch - params.pipeline_len,
-            params.pipeline_len,
-        )
+        .set(&mut storage, 17.into(), infraction_epoch - 2, 0)
         .unwrap();
-    validator_deltas_handle(&bob)
-        .set(
-            &mut storage,
-            token::Change::from(6),
-            current_epoch - params.pipeline_len,
-            params.pipeline_len,
-        )
+    total_unbonded
+        .at(&(current_epoch + params.pipeline_len))
+        .insert(&mut storage, infraction_epoch - 2, 6.into())
         .unwrap();
     let res = slash_validator(
         &storage,
         &params,
         &bob,
         slash_rate,
-        current_epoch,
+        processing_epoch,
         &Default::default(),
     )
     .unwrap();
-    assert_eq!(res, initial_stakes);
+    exp_res.insert(Epoch(12), 17.into());
+    exp_res.insert(Epoch(13), 17.into());
+    assert_eq!(res, exp_res);
 
     // Test case 3
-    // A bond that became active at the current epoch is fully unbonded at
-    // current epoch + 1
     println!("\nTEST 3:");
-    total_unbonded
-        .at(&current_epoch.next())
-        .insert(&mut storage, current_epoch, token::Amount::from(6))
+    total_redelegated_bonded
+        .at(&infraction_epoch.prev())
+        .at(&alice)
+        .insert(&mut storage, Epoch(2), 5.into())
         .unwrap();
-    validator_deltas_handle(&bob)
-        .set(
-            &mut storage,
-            token::Change::from(-6),
-            current_epoch.next() - params.pipeline_len,
-            params.pipeline_len,
-        )
+    total_redelegated_bonded
+        .at(&infraction_epoch.prev())
+        .at(&alice)
+        .insert(&mut storage, Epoch(3), 1.into())
         .unwrap();
+
     let res = slash_validator(
         &storage,
         &params,
         &bob,
         slash_rate,
-        current_epoch,
+        processing_epoch,
         &Default::default(),
     )
     .unwrap();
-    assert_eq!(res, initial_stakes);
+    assert_eq!(res, exp_res);
 
     // Test case 4
-    // A bond that became active at the current epoch is partially unbonded at
-    // current epoch + 1
     println!("\nTEST 4:");
-    total_unbonded
-        .at(&current_epoch.next())
-        .insert(&mut storage, current_epoch, token::Amount::from(3))
+    total_unbonded_handle(&bob)
+        .at(&(current_epoch + params.pipeline_len))
+        .remove(&mut storage, &(infraction_epoch - 2))
         .unwrap();
-    validator_deltas_handle(&bob)
-        .set(
-            &mut storage,
-            token::Change::from(-3),
-            current_epoch.next() - params.pipeline_len,
-            params.pipeline_len,
-        )
+    total_unbonded_handle(&bob)
+        .at(&(current_epoch + params.pipeline_len))
+        .insert(&mut storage, infraction_epoch - 1, 6.into())
+        .unwrap();
+    total_redelegated_unbonded
+        .at(&(current_epoch + params.pipeline_len))
+        .at(&infraction_epoch.prev())
+        .at(&alice)
+        .insert(&mut storage, Epoch(2), 5.into())
+        .unwrap();
+    total_redelegated_unbonded
+        .at(&(current_epoch + params.pipeline_len))
+        .at(&infraction_epoch.prev())
+        .at(&alice)
+        .insert(&mut storage, Epoch(3), 1.into())
         .unwrap();
     let res = slash_validator(
         &storage,
         &params,
         &bob,
         slash_rate,
-        current_epoch,
+        processing_epoch,
         &Default::default(),
     )
     .unwrap();
-    assert_eq!(res, initial_stakes);
+    assert_eq!(res, exp_res);
 
     // Test case 5
-    // A redelegation from alice to bob becomes active at current epoch
     println!("\nTEST 5:");
+    total_bonded_handle(&bob)
+        .set(&mut storage, 19.into(), infraction_epoch - 2, 0)
+        .unwrap();
+    total_unbonded_handle(&bob)
+        .at(&(current_epoch + params.pipeline_len))
+        .insert(&mut storage, infraction_epoch - 1, 4.into())
+        .unwrap();
+    total_redelegated_bonded
+        .at(&current_epoch)
+        .at(&alice)
+        .insert(&mut storage, Epoch(2), token::Amount::from(1))
+        .unwrap();
+    total_redelegated_unbonded
+        .at(&(current_epoch + params.pipeline_len))
+        .at(&infraction_epoch.prev())
+        .at(&alice)
+        .remove(&mut storage, &Epoch(3))
+        .unwrap();
+    total_redelegated_unbonded
+        .at(&(current_epoch + params.pipeline_len))
+        .at(&infraction_epoch.prev())
+        .at(&alice)
+        .insert(&mut storage, Epoch(2), 4.into())
+        .unwrap();
+    let res = slash_validator(
+        &storage,
+        &params,
+        &bob,
+        slash_rate,
+        processing_epoch,
+        &Default::default(),
+    )
+    .unwrap();
+    exp_res.insert(Epoch(12), 19.into());
+    exp_res.insert(Epoch(13), 19.into());
+    assert_eq!(res, exp_res);
+
+    // Test case 6
+    println!("\nTEST 6:");
+    total_unbonded_handle(&bob)
+        .remove_all(&mut storage, &(current_epoch + params.pipeline_len))
+        .unwrap();
+    total_redelegated_unbonded
+        .remove_all(&mut storage, &(current_epoch + params.pipeline_len))
+        .unwrap();
+    total_redelegated_bonded
+        .remove_all(&mut storage, &current_epoch)
+        .unwrap();
+    total_bonded_handle(&bob)
+        .set(&mut storage, 23.into(), infraction_epoch - 2, 0)
+        .unwrap();
+    total_bonded_handle(&bob)
+        .set(&mut storage, 6.into(), current_epoch, 0)
+        .unwrap();
+
+    let res = slash_validator(
+        &storage,
+        &params,
+        &bob,
+        slash_rate,
+        processing_epoch,
+        &Default::default(),
+    )
+    .unwrap();
+    exp_res = initial_stakes;
+    assert_eq!(res, exp_res);
+
+    // Test case 7
+    println!("\nTEST 7:");
     total_bonded
         .get_data_handler()
         .remove(&mut storage, &current_epoch)
         .unwrap();
     total_unbonded
-        .remove_all(&mut storage, &current_epoch.next())
-        .unwrap();
-    validator_deltas_handle(&bob)
-        .set(
-            &mut storage,
-            token::Change::zero(),
-            current_epoch.next() - params.pipeline_len,
-            params.pipeline_len,
-        )
-        .unwrap();
-    total_redelegated_bonded
-        .at(&current_epoch)
-        .at(&alice)
-        .insert(&mut storage, Epoch(2), token::Amount::from(5))
-        .unwrap();
-    total_redelegated_bonded
-        .at(&current_epoch)
-        .at(&alice)
-        .insert(&mut storage, Epoch(3), token::Amount::from(1))
+        .at(&current_epoch.next())
+        .insert(&mut storage, current_epoch, 6.into())
         .unwrap();
     let res = slash_validator(
         &storage,
         &params,
         &bob,
         slash_rate,
-        current_epoch,
+        processing_epoch,
         &Default::default(),
     )
     .unwrap();
-    assert_eq!(res, initial_stakes);
-
-    // Test case 6
-    // A redelegation that became active at current epoch is fully unbonded at
-    // current epoch + 1
-    println!("Test case 6");
-    total_redelegated_unbonded
-        .at(&current_epoch.next())
-        .at(&current_epoch)
-        .at(&alice)
-        .insert(&mut storage, Epoch(2), token::Amount::from(5))
-        .unwrap();
-    total_redelegated_unbonded
-        .at(&current_epoch.next())
-        .at(&current_epoch)
-        .at(&alice)
-        .insert(&mut storage, Epoch(3), token::Amount::from(1))
-        .unwrap();
-    validator_deltas_handle(&bob)
-        .set(
-            &mut storage,
-            token::Change::from(-6),
-            current_epoch.next() - params.pipeline_len,
-            params.pipeline_len,
-        )
-        .unwrap();
-    let res = slash_validator(
-        &storage,
-        &params,
-        &bob,
-        slash_rate,
-        current_epoch,
-        &Default::default(),
-    )
-    .unwrap();
-    assert_eq!(res, initial_stakes);
-
-    // Test case 7
-    // A redelegation that became active at current epoch is partially unbonded
-    // at current epoch + 1
-    println!("Test case 7");
-    validator_deltas_handle(&bob)
-        .set(
-            &mut storage,
-            token::Change::from(-4),
-            current_epoch.next() - params.pipeline_len,
-            params.pipeline_len,
-        )
-        .unwrap();
-    total_redelegated_unbonded
-        .at(&current_epoch.next())
-        .at(&current_epoch)
-        .at(&alice)
-        .insert(&mut storage, Epoch(2), token::Amount::from(4))
-        .unwrap();
-    total_redelegated_unbonded
-        .at(&current_epoch.next())
-        .at(&current_epoch)
-        .at(&alice)
-        .remove(&mut storage, &Epoch(3))
-        .unwrap();
-    let res = slash_validator(
-        &storage,
-        &params,
-        &bob,
-        slash_rate,
-        current_epoch,
-        &Default::default(),
-    )
-    .unwrap();
-    assert_eq!(res, initial_stakes);
+    assert_eq!(res, exp_res);
 
     // Test case 8
-    // A bond is active at current epoch and a redelegation becomes active at
-    // current epoch + 1. The redelegation is partially unbonded at current
-    // epoch + 1 as well
-    println!("Test case 8");
-    validator_deltas_handle(&bob)
-        .set(
-            &mut storage,
-            token::Change::from(12),
-            current_epoch - params.pipeline_len,
-            params.pipeline_len,
-        )
+    println!("\nTEST 8:");
+    total_bonded
+        .get_data_handler()
+        .insert(&mut storage, current_epoch, 3.into())
         .unwrap();
+    total_unbonded
+        .at(&current_epoch.next())
+        .insert(&mut storage, current_epoch, 3.into())
+        .unwrap();
+    let res = slash_validator(
+        &storage,
+        &params,
+        &bob,
+        slash_rate,
+        processing_epoch,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(res, exp_res);
+
+    // Test case 9
+    println!("\nTEST 9:");
+    total_unbonded
+        .remove_all(&mut storage, &current_epoch.next())
+        .unwrap();
+    total_bonded
+        .set(&mut storage, 6.into(), current_epoch, 0)
+        .unwrap();
+    total_redelegated_bonded
+        .at(&current_epoch)
+        .at(&alice)
+        .insert(&mut storage, 2.into(), 5.into())
+        .unwrap();
+    total_redelegated_bonded
+        .at(&current_epoch)
+        .at(&alice)
+        .insert(&mut storage, 3.into(), 1.into())
+        .unwrap();
+    let res = slash_validator(
+        &storage,
+        &params,
+        &bob,
+        slash_rate,
+        processing_epoch,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(res, exp_res);
+
+    // Test case 10
+    println!("\nTEST 10:");
     total_redelegated_bonded
         .remove_all(&mut storage, &current_epoch)
-        .unwrap();
-    total_redelegated_bonded
-        .at(&current_epoch.next())
-        .at(&alice)
-        .insert(&mut storage, Epoch(2), token::Amount::from(5))
-        .unwrap();
-    total_redelegated_bonded
-        .at(&current_epoch.next())
-        .at(&alice)
-        .insert(&mut storage, Epoch(3), token::Amount::from(1))
-        .unwrap();
-    total_redelegated_unbonded
-        .at(&current_epoch.next())
-        .remove_all(&mut storage, &current_epoch)
-        .unwrap();
-    total_redelegated_unbonded
-        .at(&current_epoch.next())
-        .at(&current_epoch.next())
-        .at(&alice)
-        .insert(&mut storage, Epoch(2), token::Amount::from(4))
         .unwrap();
     total_bonded
         .get_data_handler()
-        .insert(&mut storage, current_epoch, token::Amount::from(6))
+        .remove(&mut storage, &current_epoch)
+        .unwrap();
+    total_redelegated_unbonded
+        .at(&current_epoch.next())
+        .at(&current_epoch)
+        .at(&alice)
+        .insert(&mut storage, 2.into(), 5.into())
+        .unwrap();
+    total_redelegated_unbonded
+        .at(&current_epoch.next())
+        .at(&current_epoch)
+        .at(&alice)
+        .insert(&mut storage, 3.into(), 1.into())
         .unwrap();
     let res = slash_validator(
         &storage,
         &params,
         &bob,
         slash_rate,
-        current_epoch,
+        processing_epoch,
         &Default::default(),
     )
     .unwrap();
-    assert_eq!(res, initial_stakes);
+    assert_eq!(res, exp_res);
 
-    // Test case 9
-    // A bond is active at current epoch and a slash exists for alice
-    println!("Test case 9");
-    total_redelegated_bonded
-        .remove_all(&mut storage, &current_epoch.next())
+    // Test case 11
+    println!("\nTEST 11:");
+    total_bonded
+        .set(&mut storage, 2.into(), current_epoch, 0)
+        .unwrap();
+    total_redelegated_unbonded
+        .at(&current_epoch.next())
+        .at(&current_epoch)
+        .at(&alice)
+        .insert(&mut storage, 2.into(), 4.into())
+        .unwrap();
+    total_redelegated_unbonded
+        .at(&current_epoch.next())
+        .at(&current_epoch)
+        .at(&alice)
+        .remove(&mut storage, &3.into())
         .unwrap();
     total_redelegated_bonded
-        .remove_all(&mut storage, &current_epoch.next())
+        .at(&current_epoch)
+        .at(&alice)
+        .insert(&mut storage, 2.into(), 1.into())
         .unwrap();
-    validator_deltas_handle(&bob)
-        .get_data_handler()
-        .remove(&mut storage, &current_epoch.next())
+    total_redelegated_bonded
+        .at(&current_epoch)
+        .at(&alice)
+        .insert(&mut storage, 3.into(), 1.into())
         .unwrap();
-    validator_deltas_handle(&bob)
-        .set(
-            &mut storage,
-            token::Change::from(6),
-            current_epoch - params.pipeline_len,
-            params.pipeline_len,
-        )
+    let res = slash_validator(
+        &storage,
+        &params,
+        &bob,
+        slash_rate,
+        processing_epoch,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(res, exp_res);
+
+    // Test case 12
+    println!("\nTEST 12:");
+    total_bonded
+        .set(&mut storage, 6.into(), current_epoch, 0)
         .unwrap();
-    validator_deltas_handle(&bob)
-        .set(
-            &mut storage,
-            -infraction_stake.change(),
-            current_epoch.prev() - params.pipeline_len,
-            params.pipeline_len,
-        )
+    total_bonded
+        .set(&mut storage, 2.into(), current_epoch.next(), 0)
         .unwrap();
-    validator_slashes_handle(&alice)
+    total_redelegated_bonded
+        .remove_all(&mut storage, &current_epoch)
+        .unwrap();
+    total_redelegated_bonded
+        .at(&current_epoch.next())
+        .at(&alice)
+        .insert(&mut storage, 2.into(), 1.into())
+        .unwrap();
+    total_redelegated_bonded
+        .at(&current_epoch.next())
+        .at(&alice)
+        .insert(&mut storage, 3.into(), 1.into())
+        .unwrap();
+    let res = slash_validator(
+        &storage,
+        &params,
+        &bob,
+        slash_rate,
+        processing_epoch,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(res, exp_res);
+
+    // Test case 13
+    println!("\nTEST 13:");
+    validator_slashes_handle(&bob)
         .push(
             &mut storage,
             Slash {
-                epoch: current_epoch.prev()
-                    - params.slash_processing_epoch_offset(),
-                rate: Dec::one(),
-                block_height: Default::default(),
+                epoch: infraction_epoch.prev(),
+                block_height: 0,
                 r#type: SlashType::DuplicateVote,
+                rate: Dec::one(),
             },
         )
+        .unwrap();
+    total_redelegated_unbonded
+        .remove_all(&mut storage, &current_epoch.next())
+        .unwrap();
+    total_bonded
+        .get_data_handler()
+        .remove(&mut storage, &current_epoch.next())
+        .unwrap();
+    total_redelegated_bonded
+        .remove_all(&mut storage, &current_epoch.next())
         .unwrap();
     let res = slash_validator(
         &storage,
         &params,
         &bob,
         slash_rate,
-        current_epoch,
+        processing_epoch,
         &Default::default(),
     )
     .unwrap();
-    assert_eq!(
-        res,
-        BTreeMap::from_iter([
-            (current_epoch, token::Amount::zero()),
-            (current_epoch.next(), token::Amount::zero()),
-            (current_epoch.next().next(), token::Amount::zero())
-        ])
-    );
+    exp_res.insert(Epoch(11), 0.into());
+    exp_res.insert(Epoch(12), 0.into());
+    exp_res.insert(Epoch(13), 0.into());
+    assert_eq!(res, exp_res);
 }
 
 /// `computeAmountAfterSlashingUnbondTest`
@@ -5750,24 +5806,32 @@ fn test_chain_redelegations_aux(mut validators: Vec<GenesisValidator>) {
             .unwrap_or_default();
     assert_eq!(dest_total_redelegated_bonded, redel_amount_1);
 
-    // The dest validator's total bonded should not be updated by the
-    // redelegation (should only have an entry for its genesis bond)
+    // The dest validator's total bonded should have an entry for the genesis
+    // bond and the redelegation
     let dest_total_bonded = total_bonded_handle(&dest_validator)
         .get_data_handler()
         .collect_map(&storage)
         .unwrap();
     assert!(
-        dest_total_bonded.len() == 1
+        dest_total_bonded.len() == 2
             && dest_total_bonded.contains_key(&Epoch::default())
+    );
+    assert_eq!(
+        dest_total_bonded
+            .get(&redel_end)
+            .cloned()
+            .unwrap_or_default(),
+        redel_amount_1
     );
 
     // The src validator should have a total bonded entry for the original bond
+    // accounting for the redelegation
     assert_eq!(
         total_bonded_handle(&src_validator)
             .get_delta_val(&storage, bond_start)
             .unwrap()
             .unwrap_or_default(),
-        bond_amount
+        bond_amount - redel_amount_1
     );
 
     // The src validator should have a total unbonded entry due to the
@@ -5952,15 +6016,11 @@ fn test_chain_redelegations_aux(mut validators: Vec<GenesisValidator>) {
             .get(&storage, &redel_end)
             .unwrap()
             .unwrap_or_default();
-    assert_eq!(dest_redelegated_bonded, redel_amount_1);
+    assert_eq!(dest_redelegated_bonded, redel_amount_1 - redel_amount_2);
     assert_eq!(dest2_redelegated_bonded, redel_amount_2);
 
-    // Total redelegated unbonded should be empty for all validator
-    assert!(
-        validator_total_redelegated_unbonded_handle(&dest_validator)
-            .is_empty(&storage)
-            .unwrap()
-    );
+    // Total redelegated unbonded should be empty for src_validator and
+    // dest_validator_2
     assert!(
         validator_total_redelegated_unbonded_handle(&dest_validator_2)
             .is_empty(&storage)
@@ -5971,6 +6031,17 @@ fn test_chain_redelegations_aux(mut validators: Vec<GenesisValidator>) {
             .is_empty(&storage)
             .unwrap()
     );
+
+    // The dest_validator should have total_redelegated unbonded
+    let tot_redel_unbonded =
+        validator_total_redelegated_unbonded_handle(&dest_validator)
+            .at(&redel_2_end)
+            .at(&redel_end)
+            .at(&src_validator)
+            .get(&storage, &bond_start)
+            .unwrap()
+            .unwrap_or_default();
+    assert_eq!(tot_redel_unbonded, redel_amount_2);
 }
 
 /// SM test case 1 from Brent

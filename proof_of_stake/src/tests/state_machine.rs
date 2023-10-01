@@ -1094,11 +1094,18 @@ impl ConcretePosState {
         assert_eq!(abs_total_redel_bonded, conc_total_redel_bonded);
 
         // Check the validator total redelegated unbonded
-        let abs_total_redel_unbonded = ref_state
+        let mut abs_total_redel_unbonded = ref_state
             .validator_total_redelegated_unbonded
             .get(&id.validator)
             .cloned()
             .unwrap_or_default();
+        abs_total_redel_unbonded.retain(|_, inner1| {
+            inner1.retain(|_, inner2| {
+                inner2.retain(|_, inner3| !inner3.is_empty());
+                !inner2.is_empty()
+            });
+            !inner1.is_empty()
+        });
 
         let conc_total_redel_unbonded =
             crate::validator_total_redelegated_unbonded_handle(&id.validator)
@@ -1673,11 +1680,18 @@ impl ConcretePosState {
         assert_eq!(abs_dest_total_redel_bonded, conc_dest_total_redel_bonded);
 
         // Check the src validator's total redelegated unbonded
-        let abs_src_total_redel_unbonded = ref_state
+        let mut abs_src_total_redel_unbonded = ref_state
             .validator_total_redelegated_unbonded
             .get(src_validator)
             .cloned()
             .unwrap_or_default();
+        abs_src_total_redel_unbonded.retain(|_, inner1| {
+            inner1.retain(|_, inner2| {
+                inner2.retain(|_, inner3| !inner3.is_empty());
+                !inner2.is_empty()
+            });
+            !inner1.is_empty()
+        });
 
         let conc_src_total_redel_unbonded =
             crate::validator_total_redelegated_unbonded_handle(src_validator)
