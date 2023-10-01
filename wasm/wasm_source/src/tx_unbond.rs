@@ -175,11 +175,8 @@ mod tests {
                 &unbond.validator,
                 Epoch(epoch),
             )?);
-            epoched_bonds_pre.push(
-                bond_handle
-                    .get_delta_val(ctx(), Epoch(epoch))?
-                    .map(token::Amount::from_change),
-            );
+            epoched_bonds_pre
+                .push(bond_handle.get_delta_val(ctx(), Epoch(epoch))?);
             epoched_validator_set_pre.push(
                 read_consensus_validator_set_addresses_with_stake(
                     ctx(),
@@ -199,11 +196,8 @@ mod tests {
 
         let mut epoched_bonds_post: Vec<Option<token::Amount>> = Vec::new();
         for epoch in 0..=pos_params.unbonding_len {
-            epoched_bonds_post.push(
-                bond_handle
-                    .get_delta_val(ctx(), Epoch(epoch))?
-                    .map(token::Amount::from_change),
-            );
+            epoched_bonds_post
+                .push(bond_handle.get_delta_val(ctx(), Epoch(epoch))?);
         }
 
         let expected_amount_before_pipeline = if is_delegation {
@@ -330,7 +324,7 @@ mod tests {
             let expected_amount = initial_stake - unbond.amount;
             assert_eq!(
                 bond_amount,
-                Some(expected_amount.change()),
+                Some(expected_amount),
                 "After the tx is applied, the bond should be changed in \
                  place, checking epoch {epoch}"
             );

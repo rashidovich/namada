@@ -277,7 +277,7 @@ mod tests {
             }
             // Check that bond is updated after the pipeline length
             for epoch in pos_params.pipeline_len..=pos_params.unbonding_len {
-                let expected_bond_amount = bond.amount.change();
+                let expected_bond_amount = bond.amount;
                 let bond =
                     bonds_post.get_sum(ctx(), Epoch(epoch), &pos_params)?;
                 assert_eq!(
@@ -292,7 +292,7 @@ mod tests {
             // Check that a bond already exists from genesis with initial stake
             // for the validator
             for epoch in 0..pos_params.pipeline_len {
-                let expected_bond_amount = initial_stake.change();
+                let expected_bond_amount = initial_stake;
                 let bond = bonds_post
                     .get_sum(ctx(), Epoch(epoch), &pos_params)
                     .expect("Genesis validator should already have self-bond");
@@ -310,7 +310,7 @@ mod tests {
                     bonds_post.get_sum(ctx(), Epoch(epoch), &pos_params)?;
                 assert_eq!(
                     bond,
-                    Some(expected_bond_amount.change()),
+                    Some(expected_bond_amount),
                     "Self-bond at and after pipeline offset should contain \
                      genesis stake and the bonded amount - checking epoch \
                      {epoch}"

@@ -335,7 +335,7 @@ fn bond_deltas<D, H>(
     ctx: RequestCtx<'_, D, H>,
     source: Address,
     validator: Address,
-) -> storage_api::Result<HashMap<Epoch, token::Change>>
+) -> storage_api::Result<HashMap<Epoch, token::Amount>>
 where
     D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
@@ -362,7 +362,6 @@ where
     let handle = bond_handle(&source, &validator);
     handle
         .get_sum(ctx.wl_storage, epoch, &params)?
-        .map(token::Amount::from_change)
         .ok_or_err_msg("Cannot find bond")
 }
 

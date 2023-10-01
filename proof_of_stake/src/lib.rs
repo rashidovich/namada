@@ -364,20 +364,19 @@ where
             eth_cold_key,
             current_epoch,
         )?;
-        let delta = token::Change::from(tokens);
         validator_deltas_handle(&address).init_at_genesis(
             storage,
-            delta,
+            tokens.change(),
             current_epoch,
         )?;
         bond_handle(&address, &address).init_at_genesis(
             storage,
-            delta,
+            tokens,
             current_epoch,
         )?;
         total_bonded_handle(&address).init_at_genesis(
             storage,
-            delta,
+            tokens,
             current_epoch,
         )?;
         validator_commission_rate_handle(&address).init_at_genesis(
@@ -871,7 +870,6 @@ where
     }
 
     // Initialize or update the bond at the pipeline offset
-    let amount = amount.change();
     bond_handle.add(storage, amount, current_epoch, params.pipeline_len)?;
     total_bonded_handle.add(
         storage,
@@ -899,7 +897,7 @@ where
             storage,
             &params,
             validator,
-            amount,
+            amount.change(),
             pipeline_epoch,
         )?;
     }
@@ -908,23 +906,21 @@ where
     update_validator_deltas(
         storage,
         validator,
-        amount,
+        amount.change(),
         current_epoch,
         params.pipeline_len,
     )?;
 
-    update_total_deltas(storage, amount, current_epoch, params.pipeline_len)?;
+    update_total_deltas(
+        storage,
+        amount.change(),
+        current_epoch,
+        params.pipeline_len,
+    )?;
 
     // Transfer the bonded tokens from the source to PoS
     let staking_token = staking_token_address(storage);
-    debug_assert!(amount.non_negative());
-    token::transfer(
-        storage,
-        &staking_token,
-        source,
-        &ADDRESS,
-        token::Amount::from_change(amount),
-    )?;
+    token::transfer(storage, &staking_token, source, &ADDRESS, amount)?;
 
     Ok(())
 }
@@ -1738,8 +1734,11 @@ pub fn unbond_tokens<S>(
 where
     S: StorageRead + StorageWrite,
 {
-    let amount = amount.change();
-    tracing::debug!("Unbonding token amount {amount} at epoch {current_epoch}");
+    tracing::debug!(
+        "Unbonding token amount {} at epoch {}",
+        amount.to_string_native(),
+        current_epoch
+    );
     if amount.is_zero() {
         return Ok(ResultSlashing::default());
     }
@@ -1775,9 +1774,8 @@ where
         .unwrap_or_default();
     if amount > remaining_at_pipeline {
         return Err(UnbondError::UnbondAmountGreaterThanBond(
-            token::Amount::from_change(amount).to_string_native(),
-            token::Amount::from_change(remaining_at_pipeline)
-                .to_string_native(),
+            amount.to_string_native(),
+            remaining_at_pipeline.to_string_native(),
         )
         .into());
     }
@@ -1811,10 +1809,6 @@ where
     // this is the case, compute the modified state of the redelegation.
     let modified_redelegation = match bonds_to_unbond.new_entry {
         Some((bond_epoch, new_bond_amount)) => {
-            tracing::debug!(
-                "New bond entry for epoch {bond_epoch} -> amount \
-                 {new_bond_amount}",
-            );
             if redelegated_bonds.contains(storage, &bond_epoch)? {
                 let cur_bond_amount = bonds_handle
                     .get_delta_val(storage, bond_epoch)?
@@ -1866,8 +1860,7 @@ where
             } else {
                 cur_bond_value
             };
-            debug_assert!(value.non_negative());
-            (epoch, token::Amount::from_change(value))
+            (epoch, value)
         })
         .collect::<BTreeMap<Epoch, token::Amount>>();
 
@@ -1878,11 +1871,6 @@ where
     }
     // Replace bond amount for partial unbond, if any.
     if let Some((bond_epoch, new_bond_amount)) = bonds_to_unbond.new_entry {
-        tracing::debug!(
-            "New bond entry: ({}, {})",
-            bond_epoch,
-            new_bond_amount
-        );
         bonds_handle.set(storage, new_bond_amount, bond_epoch, 0)?;
     }
 
@@ -1964,7 +1952,7 @@ where
     let total_unbonded = total_unbonded_handle(validator).at(&pipeline_epoch);
     for (&start_epoch, &amount) in &new_unbonds_map {
         total_bonded.update(storage, start_epoch, |current| {
-            current.unwrap_or_default() - amount.change()
+            current.unwrap_or_default() - amount
         })?;
         total_unbonded.update(storage, start_epoch, |current| {
             current.unwrap_or_default() + amount
@@ -2042,7 +2030,7 @@ where
     #[cfg(debug_assertions)]
     let redel_bonds_post = redelegated_bonds.collect_map(storage)?;
     debug_assert!(
-        result_slashing.sum.change() <= amount,
+        result_slashing.sum <= amount,
         "Amount after slashing ({}) must be <= requested amount to unbond \
          ({}).",
         result_slashing.sum.to_string_native(),
@@ -2172,11 +2160,9 @@ where
             // Sort slashes by epoch
             merged.sort_by(|s1, s2| s1.epoch.partial_cmp(&s2.epoch).unwrap());
 
-            debug_assert!(change.non_negative());
-            let amount = token::Amount::from_change(change);
-            result.total_redelegated += amount;
+            result.total_redelegated += change;
             result.total_after_slashing +=
-                apply_list_slashes(params, &merged, amount);
+                apply_list_slashes(params, &merged, change);
         }
     }
     result
@@ -2235,7 +2221,7 @@ struct BondsForRemovalRes {
     /// Full unbond epochs
     pub epochs: BTreeSet<Epoch>,
     /// Partial unbond epoch associated with the new bond amount
-    pub new_entry: Option<(Epoch, token::Change)>,
+    pub new_entry: Option<(Epoch, token::Amount)>,
 }
 
 /// In decreasing epoch order, decrement the non-zero bond amount entries until
@@ -2245,8 +2231,8 @@ struct BondsForRemovalRes {
 /// removed, if any.
 fn find_bonds_to_remove<S>(
     storage: &S,
-    bonds_handle: &LazyMap<Epoch, token::Change>,
-    amount: token::Change,
+    bonds_handle: &LazyMap<Epoch, token::Amount>,
+    amount: token::Amount,
 ) -> storage_api::Result<BondsForRemovalRes>
 where
     S: StorageRead,
@@ -2281,7 +2267,7 @@ struct ModifiedRedelegation {
     validator_to_modify: Option<Address>,
     epochs_to_remove: BTreeSet<Epoch>,
     epoch_to_modify: Option<Epoch>,
-    new_amount: Option<token::Change>,
+    new_amount: Option<token::Amount>,
 }
 
 /// Used in `fn unbond_tokens` to compute the modified state of a redelegation
@@ -2290,7 +2276,7 @@ fn compute_modified_redelegation<S>(
     storage: &S,
     redelegated_bonds: &RedelegatedTokens,
     start_epoch: Epoch,
-    amount: token::Change,
+    amount_to_unbond: token::Amount,
 ) -> storage_api::Result<ModifiedRedelegation>
 where
     S: StorageRead,
@@ -2304,7 +2290,7 @@ where
     let mut modified_redelegation = ModifiedRedelegation::default();
 
     let mut src_validators = BTreeSet::<Address>::new();
-    let mut total_redelegated = token::Change::zero();
+    let mut total_redelegated = token::Amount::zero();
     for rb in redelegated_bonds.iter(storage)? {
         let (
             NestedSubKey::Data {
@@ -2321,7 +2307,7 @@ where
 
     // If the total amount of redelegated bonds is less than the target amount,
     // then all redelegated bonds must be unbonded.
-    if total_redelegated <= amount {
+    if total_redelegated <= amount_to_unbond {
         return Ok(modified_redelegation);
     }
 
@@ -2329,7 +2315,7 @@ where
 
     // TODO: desire some deterministic ordering of validators here (not
     // determined in Quint spec yet either)
-    let mut remaining = amount;
+    let mut remaining = amount_to_unbond;
     for src_validator in src_validators.into_iter() {
         if remaining.is_zero() {
             break;
@@ -2341,7 +2327,7 @@ where
                 let (_, amount) = res?;
                 Ok(amount)
             })
-            .sum::<storage_api::Result<token::Change>>()?;
+            .sum::<storage_api::Result<token::Amount>>()?;
 
         // TODO: move this into the `if total_redelegated <= remaining` branch
         // below, then we don't have to remove it in `fn
@@ -2361,7 +2347,7 @@ where
                 find_bonds_to_remove(storage, &rbonds, remaining)?;
             // dbg!(&bonds_to_remove);
 
-            remaining = token::Change::zero();
+            remaining = token::Amount::zero();
 
             // NOTE: When there are multiple `src_validators` from which we're
             // unbonding, `validator_to_modify` cannot get overriden, because
@@ -3136,7 +3122,7 @@ where
     // Accumulate incoming redelegations slashes from source validator, if any.
     // This ensures that if there're slashes on both src validator and dest
     // validator, they're combined correctly.
-    let mut redelegation_slashes = BTreeMap::<Epoch, token::Change>::new();
+    let mut redelegation_slashes = BTreeMap::<Epoch, token::Amount>::new();
     for res in delegator_redelegated_bonds_handle(&bond_id.source)
         .at(&bond_id.validator)
         .iter(storage)?
@@ -3152,8 +3138,7 @@ where
             },
             delta,
         ) = res?;
-        debug_assert!(delta.non_negative());
-        let mut slashed_delta = token::Amount::from_change(delta);
+        let mut slashed_delta = delta;
         let slashes = find_slashes_in_range(
             storage,
             start,
@@ -3172,7 +3157,7 @@ where
             }
         }
         *redelegation_slashes.entry(redelegation_end).or_default() +=
-            delta - slashed_delta.change();
+            delta - slashed_delta;
     }
 
     let bonds =
@@ -3198,7 +3183,7 @@ where
             let current_slash = slashed_delta.mul_ceil(rate);
             slashed_delta -= current_slash;
         }
-        total_active += token::Amount::from(slashed_delta);
+        total_active += slashed_delta;
     }
 
     // Add unbonds that are still contributing to stake
@@ -3260,7 +3245,7 @@ where
                         slashed_delta -= current_slash;
                     }
                 }
-                total_active += token::Amount::from(slashed_delta);
+                total_active += slashed_delta;
             }
         }
 
@@ -3305,7 +3290,7 @@ where
                         slashed_delta -= current_slash;
                     }
                 }
-                total_active += token::Amount::from(slashed_delta);
+                total_active += slashed_delta;
             }
         }
     }
@@ -3564,9 +3549,7 @@ where
         let deltas_sum = bond_handle(owner, &validator_address)
             .get_sum(storage, *epoch, &params)?
             .unwrap_or_default();
-        debug_assert!(deltas_sum.non_negative());
-        delegations
-            .insert(validator_address, token::Amount::from_change(deltas_sum));
+        delegations.insert(validator_address, deltas_sum);
     }
     Ok(delegations)
 }
@@ -3587,7 +3570,7 @@ pub fn find_bonds<S>(
     storage: &S,
     source: &Address,
     validator: &Address,
-) -> storage_api::Result<BTreeMap<Epoch, token::Change>>
+) -> storage_api::Result<BTreeMap<Epoch, token::Amount>>
 where
     S: StorageRead,
 {
@@ -3756,7 +3739,7 @@ where
                     {
                         return None;
                     }
-                    let change: token::Change =
+                    let change: token::Amount =
                         BorshDeserialize::try_from_slice(&val_bytes).ok()?;
                     if change.is_zero() {
                         return None;
@@ -3881,12 +3864,12 @@ where
 
     let bonds = find_bonds(storage, &source, &validator)?
         .into_iter()
-        .filter(|(_start, change)| *change > token::Change::zero())
-        .map(|(start, change)| {
+        .filter(|(_start, amount)| *amount > token::Amount::zero())
+        .map(|(start, amount)| {
             make_bond_details(
                 params,
                 &validator,
-                change,
+                amount,
                 start,
                 &slashes,
                 &mut applied_slashes,
@@ -3920,7 +3903,7 @@ where
 fn make_bond_details(
     params: &PosParams,
     validator: &Address,
-    deltas_sum: token::Change,
+    deltas_sum: token::Amount,
     start: Epoch,
     slashes: &[Slash],
     applied_slashes: &mut HashMap<Address, Vec<Slash>>,
@@ -3930,8 +3913,7 @@ fn make_bond_details(
         .get(validator)
         .cloned()
         .unwrap_or_default();
-    debug_assert!(deltas_sum.non_negative());
-    let amount = token::Amount::from_change(deltas_sum);
+
     let mut slash_rates_by_epoch = BTreeMap::<Epoch, Dec>::new();
 
     let validator_slashes =
@@ -3951,13 +3933,14 @@ fn make_bond_details(
         None
     } else {
         let amount_after_slashing =
-            get_slashed_amount(params, amount, &slash_rates_by_epoch).unwrap();
-        Some(amount - amount_after_slashing)
+            get_slashed_amount(params, deltas_sum, &slash_rates_by_epoch)
+                .unwrap();
+        Some(deltas_sum - amount_after_slashing)
     };
 
     BondDetails {
         start,
-        amount,
+        amount: deltas_sum,
         slashed_amount,
     }
 }
@@ -4489,7 +4472,7 @@ where
     // IMPORTANT NOTE: due to https://github.com/anoma/namada/issues/1829, going to shift the slashing to one epoch in the future!!
     for (validator, slash_amounts) in map_validator_slash {
         tracing::debug!("Slashing validator {}", validator);
-        let mut slash_acc = token::Change::zero();
+        let mut slash_acc = token::Amount::zero();
 
         // Update validator sets first because it needs to be able to read
         // validator stake before we make any changes to it
@@ -4507,7 +4490,7 @@ where
                     storage,
                     &params,
                     &validator,
-                    -slash_amount,
+                    -slash_amount.change(),
                     epoch,
                 )?;
             }
@@ -4525,11 +4508,11 @@ where
             update_validator_deltas(
                 storage,
                 &validator,
-                -slash_delta,
+                -slash_delta.change(),
                 epoch,
                 0,
             )?;
-            update_total_deltas(storage, -slash_delta, epoch, 0)?;
+            update_total_deltas(storage, -slash_delta.change(), epoch, 0)?;
         }
 
         // TODO: should we clear some storage here as is done in Quint??
@@ -4663,7 +4646,7 @@ fn slash_validator_redelegation<S>(
     slashes: &Slashes,
     dest_total_redelegated_unbonded: &TotalRedelegatedUnbonded,
     slash_rate: Dec,
-    dest_slashed_amounts: &mut BTreeMap<Epoch, token::Change>,
+    dest_slashed_amounts: &mut BTreeMap<Epoch, token::Amount>,
 ) -> storage_api::Result<()>
 where
     S: StorageRead,
@@ -4723,7 +4706,7 @@ fn slash_redelegation<S>(
     slashes: &Slashes,
     total_redelegated_unbonded: &TotalRedelegatedUnbonded,
     slash_rate: Dec,
-    slashed_amounts: &mut BTreeMap<Epoch, token::Change>,
+    slashed_amounts: &mut BTreeMap<Epoch, token::Amount>,
 ) -> storage_api::Result<()>
 where
     S: StorageRead,
@@ -4752,8 +4735,7 @@ where
                     .at(src_validator)
                     .get(storage, &bond_start)?
                     .unwrap_or_default();
-                debug_assert!(redelegated_unbonded.non_negative());
-                Ok(token::Amount::from_change(redelegated_unbonded))
+                Ok(redelegated_unbonded)
             })
             .sum::<storage_api::Result<token::Amount>>()?;
 
@@ -4765,8 +4747,7 @@ where
                 .at(src_validator)
                 .get(storage, &bond_start)?
                 .unwrap_or_default();
-            debug_assert!(redelegated_unbonded.non_negative());
-            init_tot_unbonded + token::Amount::from_change(redelegated_unbonded)
+            init_tot_unbonded + redelegated_unbonded
         };
         tracing::debug!(
             "updated_total_unbonded = {}",
@@ -4827,7 +4808,7 @@ where
         );
 
         init_tot_unbonded = updated_total_unbonded;
-        let to_slash = cmp::min(slashed, slashable_stake).change();
+        let to_slash = cmp::min(slashed, slashable_stake);
         if !to_slash.is_zero() {
             let map_value = slashed_amounts.entry(epoch).or_default();
             // dbg!(&map_value);
@@ -4857,8 +4838,8 @@ fn slash_validator<S>(
     validator: &Address,
     slash_rate: Dec,
     current_epoch: Epoch,
-    slashed_amounts_map: &BTreeMap<Epoch, token::Change>,
-) -> storage_api::Result<BTreeMap<Epoch, token::Change>>
+    slashed_amounts_map: &BTreeMap<Epoch, token::Amount>,
+) -> storage_api::Result<BTreeMap<Epoch, token::Amount>>
 where
     S: StorageRead,
 {
@@ -4923,7 +4904,7 @@ where
                     epoch,
                     infraction_epoch,
                     *bond_start,
-                    token::Amount::from(*bond_amount),
+                    *bond_amount,
                     redelegated_bonds.get(bond_start),
                     slash_rate,
                 )
@@ -4936,7 +4917,6 @@ where
             .unwrap()
             .into_iter()
             .filter(|(ep, _)| *ep <= infraction_epoch)
-            .map(|(epoch, amount)| (epoch, amount.change()))
             .collect::<BTreeMap<_, _>>();
 
         let new_redelegated_bonds = tot_bonds
@@ -4963,7 +4943,7 @@ where
 
         // `newSlashesMap`
         let cur = slashed_amounts.entry(epoch).or_default();
-        *cur += sum.change();
+        *cur += sum;
     }
     // Hack - should this be done differently? (think this is safe)
     let pipeline_epoch = current_epoch + params.pipeline_len;
@@ -5717,7 +5697,7 @@ where
 
     // The unbonded amount after slashing is what is going to be redelegated.
     // `amountAfterSlashing`
-    let amount_after_slashing = result_unbond.sum.change();
+    let amount_after_slashing = result_unbond.sum;
 
     // Add incoming redelegated bonds to the dest validator.
     // `updatedRedelegatedBonds` with updates to delegatorState
@@ -5728,7 +5708,7 @@ where
         .at(src_validator);
     for (&epoch, &unbonded_amount) in result_unbond.epoch_map.iter() {
         redelegated_bonds.update(storage, epoch, |current| {
-            current.unwrap_or_default() + unbonded_amount.change()
+            current.unwrap_or_default() + unbonded_amount
         })?;
     }
 
@@ -5783,7 +5763,7 @@ where
             .at(src_validator);
     for (&epoch, &amount) in &result_unbond.epoch_map {
         dest_total_redelegated_bonded.update(storage, epoch, |current| {
-            current.unwrap_or_default() + amount.change()
+            current.unwrap_or_default() + amount
         })?;
     }
 
@@ -5810,7 +5790,7 @@ where
             storage,
             &params,
             dest_validator,
-            amount_after_slashing,
+            amount_after_slashing.change(),
             pipeline_epoch,
         )?;
     }
@@ -5819,13 +5799,13 @@ where
     update_validator_deltas(
         storage,
         dest_validator,
-        amount_after_slashing,
+        amount_after_slashing.change(),
         current_epoch,
         params.pipeline_len,
     )?;
     update_total_deltas(
         storage,
-        amount_after_slashing,
+        amount_after_slashing.change(),
         current_epoch,
         params.pipeline_len,
     )?;

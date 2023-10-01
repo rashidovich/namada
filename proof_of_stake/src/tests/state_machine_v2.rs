@@ -2213,9 +2213,9 @@ impl StateMachineTest for ConcretePosState {
                         this_amount_after_slash -= slash;
                     }
 
-                    if to_redelegate.change() >= delta {
-                        amount_after_slash += this_amount_after_slash.into();
-                        to_redelegate -= delta.into();
+                    if to_redelegate >= delta {
+                        amount_after_slash += this_amount_after_slash;
+                        to_redelegate -= delta;
                     } else {
                         // We have to divide this bond in case there are slashes
                         let slash_ratio = Dec::from(this_amount_after_slash)
@@ -2257,10 +2257,9 @@ impl StateMachineTest for ConcretePosState {
                             this_amount_after_slash -= slash;
                         }
 
-                        if to_redelegate.change() >= bond_delta {
-                            amount_after_slash +=
-                                this_amount_after_slash.into();
-                            to_redelegate -= bond_delta.into();
+                        if to_redelegate >= bond_delta {
+                            amount_after_slash += this_amount_after_slash;
+                            to_redelegate -= bond_delta;
                         } else {
                             // We have to divide this bond in case there are
                             // slashes

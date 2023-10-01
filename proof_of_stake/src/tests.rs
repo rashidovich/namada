@@ -374,7 +374,7 @@ fn test_bonds_aux(params: PosParams, validators: Vec<GenesisValidator>) {
     // Check the bond delta
     let self_bond = bond_handle(&validator.address, &validator.address);
     let delta = self_bond.get_delta_val(&s, pipeline_epoch).unwrap();
-    assert_eq!(delta, Some(amount_self_bond.change()));
+    assert_eq!(delta, Some(amount_self_bond));
 
     // Check the validator in the validator set
     let set =
@@ -502,14 +502,14 @@ fn test_bonds_aux(params: PosParams, validators: Vec<GenesisValidator>) {
             .get_sum(&s, pipeline_epoch.prev(), &params)
             .unwrap()
             .unwrap_or_default(),
-        token::Change::zero()
+        token::Amount::zero()
     );
     assert_eq!(
         delegation
             .get_sum(&s, pipeline_epoch, &params)
             .unwrap()
             .unwrap_or_default(),
-        amount_del.change()
+        amount_del
     );
 
     // Check delegation bonds details after delegation
@@ -948,7 +948,7 @@ fn test_become_validator_aux(
     let bond_handle = bond_handle(&new_validator, &new_validator);
     let pipeline_epoch = current_epoch + params.pipeline_len;
     let delta = bond_handle.get_delta_val(&s, pipeline_epoch).unwrap();
-    assert_eq!(delta, Some(amount.change()));
+    assert_eq!(delta, Some(amount));
 
     // Check the validator in the validator set -
     // If the consensus validator slots are full and all the genesis validators
@@ -2342,20 +2342,20 @@ fn test_find_bonds_to_remove() {
     let (e1, e2, e6) = (Epoch(1), Epoch(2), Epoch(6));
 
     bond_handle
-        .set(&mut storage, token::Change::from(5), e1, 0)
+        .set(&mut storage, token::Amount::from(5), e1, 0)
         .unwrap();
     bond_handle
-        .set(&mut storage, token::Change::from(3), e2, 0)
+        .set(&mut storage, token::Amount::from(3), e2, 0)
         .unwrap();
     bond_handle
-        .set(&mut storage, token::Change::from(8), e6, 0)
+        .set(&mut storage, token::Amount::from(8), e6, 0)
         .unwrap();
 
     // Test 1
     let bonds_for_removal = find_bonds_to_remove(
         &storage,
         &bond_handle.get_data_handler(),
-        token::Change::from(8),
+        token::Amount::from(8),
     )
     .unwrap();
     assert_eq!(
@@ -2368,7 +2368,7 @@ fn test_find_bonds_to_remove() {
     let bonds_for_removal = find_bonds_to_remove(
         &storage,
         &bond_handle.get_data_handler(),
-        token::Change::from(10),
+        token::Amount::from(10),
     )
     .unwrap();
     assert_eq!(
@@ -2377,14 +2377,14 @@ fn test_find_bonds_to_remove() {
     );
     assert_eq!(
         bonds_for_removal.new_entry,
-        Some((Epoch(2), token::Change::from(1)))
+        Some((Epoch(2), token::Amount::from(1)))
     );
 
     // Test 3
     let bonds_for_removal = find_bonds_to_remove(
         &storage,
         &bond_handle.get_data_handler(),
-        token::Change::from(11),
+        token::Amount::from(11),
     )
     .unwrap();
     assert_eq!(
@@ -2397,7 +2397,7 @@ fn test_find_bonds_to_remove() {
     let bonds_for_removal = find_bonds_to_remove(
         &storage,
         &bond_handle.get_data_handler(),
-        token::Change::from(12),
+        token::Amount::from(12),
     )
     .unwrap();
     assert_eq!(
@@ -2406,7 +2406,7 @@ fn test_find_bonds_to_remove() {
     );
     assert_eq!(
         bonds_for_removal.new_entry,
-        Some((Epoch(1), token::Change::from(4)))
+        Some((Epoch(1), token::Amount::from(4)))
     );
 }
 
@@ -2436,19 +2436,19 @@ fn test_compute_modified_redelegation() {
         .at(&outer_epoch);
     redelegated_bonds_map
         .at(&alice)
-        .insert(&mut storage, Epoch(2), token::Change::from(6))
+        .insert(&mut storage, Epoch(2), token::Amount::from(6))
         .unwrap();
     redelegated_bonds_map
         .at(&alice)
-        .insert(&mut storage, Epoch(4), token::Change::from(7))
+        .insert(&mut storage, Epoch(4), token::Amount::from(7))
         .unwrap();
     redelegated_bonds_map
         .at(&bob)
-        .insert(&mut storage, Epoch(1), token::Change::from(5))
+        .insert(&mut storage, Epoch(1), token::Amount::from(5))
         .unwrap();
     redelegated_bonds_map
         .at(&bob)
-        .insert(&mut storage, Epoch(4), token::Change::from(7))
+        .insert(&mut storage, Epoch(4), token::Amount::from(7))
         .unwrap();
 
     // Test cases 1 and 2
@@ -2456,14 +2456,14 @@ fn test_compute_modified_redelegation() {
         &storage,
         &redelegated_bonds_map,
         Epoch(5),
-        token::Change::from(25),
+        token::Amount::from(25),
     )
     .unwrap();
     let mr2 = compute_modified_redelegation(
         &storage,
         &redelegated_bonds_map,
         Epoch(5),
-        token::Change::from(30),
+        token::Amount::from(30),
     )
     .unwrap();
 
@@ -2480,7 +2480,7 @@ fn test_compute_modified_redelegation() {
         &storage,
         &redelegated_bonds_map,
         Epoch(5),
-        token::Change::from(7),
+        token::Amount::from(7),
     )
     .unwrap();
 
@@ -2498,7 +2498,7 @@ fn test_compute_modified_redelegation() {
         &storage,
         &redelegated_bonds_map,
         Epoch(5),
-        token::Change::from(8),
+        token::Amount::from(8),
     )
     .unwrap();
 
@@ -2642,7 +2642,7 @@ fn test_compute_bond_at_epoch() {
     let mut redel_bonds = EagerRedelegatedBondsMap::default();
     redel_bonds.insert(
         alice.clone(),
-        BTreeMap::from_iter([(Epoch(1), token::Change::from(5))]),
+        BTreeMap::from_iter([(Epoch(1), token::Amount::from(5))]),
     );
     let res = compute_bond_at_epoch(
         &storage,
@@ -2754,7 +2754,7 @@ fn test_compute_slash_bond_at_epoch() {
 
     let redelegated_bond = BTreeMap::from_iter([(
         alice,
-        BTreeMap::from_iter([(infraction_epoch - 4, token::Change::from(10))]),
+        BTreeMap::from_iter([(infraction_epoch - 4, token::Amount::from(10))]),
     )]);
 
     // Test 1
@@ -2861,14 +2861,14 @@ fn test_compute_new_redelegated_unbonds() {
         redelegated_bonds
             .at(&outer_ep)
             .at(&address)
-            .insert(&mut storage, inner_ep, token::Change::from(amount))
+            .insert(&mut storage, inner_ep, token::Amount::from(amount))
             .unwrap();
         eager_map
             .entry(outer_ep)
             .or_default()
             .entry(address.clone())
             .or_default()
-            .insert(inner_ep, token::Change::from(amount));
+            .insert(inner_ep, token::Amount::from(amount));
     }
 
     // Different ModifiedRedelegation objects for testing
@@ -2903,7 +2903,7 @@ fn test_compute_new_redelegated_unbonds() {
         validator_to_modify: Some(bob.clone()),
         epochs_to_remove: BTreeSet::from_iter([ep1, ep4]),
         epoch_to_modify: Some(ep4),
-        new_amount: Some(token::Change::from(1)),
+        new_amount: Some(token::Amount::from(1)),
     };
 
     // Test case 1
@@ -2994,7 +2994,7 @@ fn test_compute_new_redelegated_unbonds() {
         .or_default()
         .entry(bob)
         .or_default()
-        .insert(ep4, token::Change::from(1));
+        .insert(ep4, token::Amount::from(1));
     assert_eq!(res, exp_res);
 }
 
@@ -3136,7 +3136,7 @@ fn test_fold_and_slash_redelegated_bonds() {
             eager_redel_bonds
                 .entry(address.clone())
                 .or_default()
-                .insert(Epoch(epoch), token::Change::from(amount));
+                .insert(Epoch(epoch), token::Amount::from(amount));
         }
     }
 
@@ -3835,14 +3835,14 @@ fn test_slash_redelegation() {
         .at(&Epoch(13))
         .at(&Epoch(10))
         .at(&alice)
-        .insert(&mut storage, Epoch(7), token::Change::from(2))
+        .insert(&mut storage, Epoch(7), token::Amount::from(2))
         .unwrap();
 
     let slashes = validator_slashes_handle(&alice);
 
     let mut slashed_amounts_map = BTreeMap::from_iter([
-        (Epoch(15), token::Change::zero()),
-        (Epoch(16), token::Change::zero()),
+        (Epoch(15), token::Amount::zero()),
+        (Epoch(16), token::Amount::zero()),
     ]);
     let empty_slash_amounts = slashed_amounts_map.clone();
 
@@ -3864,8 +3864,8 @@ fn test_slash_redelegation() {
     assert_eq!(
         slashed_amounts_map,
         BTreeMap::from_iter([
-            (Epoch(15), token::Change::from(5)),
-            (Epoch(16), token::Change::from(5)),
+            (Epoch(15), token::Amount::from(5)),
+            (Epoch(16), token::Amount::from(5)),
         ])
     );
 
@@ -3888,15 +3888,15 @@ fn test_slash_redelegation() {
     assert_eq!(
         slashed_amounts_map,
         BTreeMap::from_iter([
-            (Epoch(15), token::Change::from(7)),
-            (Epoch(16), token::Change::from(7)),
+            (Epoch(15), token::Amount::from(7)),
+            (Epoch(16), token::Amount::from(7)),
         ])
     );
 
     // Test case 3
     slashed_amounts_map = BTreeMap::from_iter([
-        (Epoch(15), token::Change::from(2)),
-        (Epoch(16), token::Change::from(3)),
+        (Epoch(15), token::Amount::from(2)),
+        (Epoch(16), token::Amount::from(3)),
     ]);
     slash_redelegation(
         &storage,
@@ -3915,8 +3915,8 @@ fn test_slash_redelegation() {
     assert_eq!(
         slashed_amounts_map,
         BTreeMap::from_iter([
-            (Epoch(15), token::Change::from(7)),
-            (Epoch(16), token::Change::from(8)),
+            (Epoch(15), token::Amount::from(7)),
+            (Epoch(16), token::Amount::from(8)),
         ])
     );
 
@@ -4024,7 +4024,7 @@ fn test_slash_validator_redelegation() {
         .at(&Epoch(13))
         .at(&Epoch(10))
         .at(&alice)
-        .insert(&mut storage, Epoch(7), token::Change::from(2))
+        .insert(&mut storage, Epoch(7), token::Amount::from(2))
         .unwrap();
 
     let outgoing_redelegations =
@@ -4033,8 +4033,8 @@ fn test_slash_validator_redelegation() {
     let slashes = validator_slashes_handle(&alice);
 
     let mut slashed_amounts_map = BTreeMap::from_iter([
-        (Epoch(15), token::Change::zero()),
-        (Epoch(16), token::Change::zero()),
+        (Epoch(15), token::Amount::zero()),
+        (Epoch(16), token::Amount::zero()),
     ]);
     let empty_slash_amounts = slashed_amounts_map.clone();
 
@@ -4076,7 +4076,7 @@ fn test_slash_validator_redelegation() {
         .at(&Epoch(13))
         .at(&Epoch(10))
         .at(&alice)
-        .insert(&mut storage, Epoch(7), token::Change::from(2))
+        .insert(&mut storage, Epoch(7), token::Amount::from(2))
         .unwrap();
     outgoing_redelegations
         .at(&Epoch(6))
@@ -4097,8 +4097,8 @@ fn test_slash_validator_redelegation() {
     assert_eq!(
         slashed_amounts_map,
         BTreeMap::from_iter([
-            (Epoch(15), token::Change::from(7)),
-            (Epoch(16), token::Change::from(7)),
+            (Epoch(15), token::Amount::from(7)),
+            (Epoch(16), token::Amount::from(7)),
         ])
     );
 
@@ -4126,15 +4126,15 @@ fn test_slash_validator_redelegation() {
     assert_eq!(
         slashed_amounts_map,
         BTreeMap::from_iter([
-            (Epoch(15), token::Change::from(5)),
-            (Epoch(16), token::Change::from(5)),
+            (Epoch(15), token::Amount::from(5)),
+            (Epoch(16), token::Amount::from(5)),
         ])
     );
 
     // Test case 5
     slashed_amounts_map = BTreeMap::from_iter([
-        (Epoch(15), token::Change::from(2)),
-        (Epoch(16), token::Change::from(3)),
+        (Epoch(15), token::Amount::from(2)),
+        (Epoch(16), token::Amount::from(3)),
     ]);
     slash_validator_redelegation(
         &storage,
@@ -4151,8 +4151,8 @@ fn test_slash_validator_redelegation() {
     assert_eq!(
         slashed_amounts_map,
         BTreeMap::from_iter([
-            (Epoch(15), token::Change::from(7)),
-            (Epoch(16), token::Change::from(8)),
+            (Epoch(15), token::Amount::from(7)),
+            (Epoch(16), token::Amount::from(8)),
         ])
     );
 
@@ -4202,7 +4202,7 @@ fn test_slash_validator() {
     let total_redelegated_unbonded =
         validator_total_redelegated_unbonded_handle(&bob);
 
-    let infraction_stake = token::Change::from(23);
+    let infraction_stake = token::Amount::from(23);
 
     let initial_stakes = BTreeMap::from_iter([
         (Epoch(10), infraction_stake),
@@ -4215,7 +4215,7 @@ fn test_slash_validator() {
 
     // Insert initial stake at epoch 0
     validator_deltas_handle(&bob)
-        .set(&mut storage, infraction_stake, Epoch::default(), 0)
+        .set(&mut storage, infraction_stake.change(), Epoch::default(), 0)
         .unwrap();
 
     // Test case 1
@@ -4238,7 +4238,7 @@ fn test_slash_validator() {
     total_bonded
         .set(
             &mut storage,
-            token::Change::from(6),
+            token::Amount::from(6),
             current_epoch - params.pipeline_len,
             params.pipeline_len,
         )
@@ -4337,12 +4337,12 @@ fn test_slash_validator() {
     total_redelegated_bonded
         .at(&current_epoch)
         .at(&alice)
-        .insert(&mut storage, Epoch(2), token::Change::from(5))
+        .insert(&mut storage, Epoch(2), token::Amount::from(5))
         .unwrap();
     total_redelegated_bonded
         .at(&current_epoch)
         .at(&alice)
-        .insert(&mut storage, Epoch(3), token::Change::from(1))
+        .insert(&mut storage, Epoch(3), token::Amount::from(1))
         .unwrap();
     let res = slash_validator(
         &storage,
@@ -4363,13 +4363,13 @@ fn test_slash_validator() {
         .at(&current_epoch.next())
         .at(&current_epoch)
         .at(&alice)
-        .insert(&mut storage, Epoch(2), token::Change::from(5))
+        .insert(&mut storage, Epoch(2), token::Amount::from(5))
         .unwrap();
     total_redelegated_unbonded
         .at(&current_epoch.next())
         .at(&current_epoch)
         .at(&alice)
-        .insert(&mut storage, Epoch(3), token::Change::from(1))
+        .insert(&mut storage, Epoch(3), token::Amount::from(1))
         .unwrap();
     validator_deltas_handle(&bob)
         .set(
@@ -4406,7 +4406,7 @@ fn test_slash_validator() {
         .at(&current_epoch.next())
         .at(&current_epoch)
         .at(&alice)
-        .insert(&mut storage, Epoch(2), token::Change::from(4))
+        .insert(&mut storage, Epoch(2), token::Amount::from(4))
         .unwrap();
     total_redelegated_unbonded
         .at(&current_epoch.next())
@@ -4444,12 +4444,12 @@ fn test_slash_validator() {
     total_redelegated_bonded
         .at(&current_epoch.next())
         .at(&alice)
-        .insert(&mut storage, Epoch(2), token::Change::from(5))
+        .insert(&mut storage, Epoch(2), token::Amount::from(5))
         .unwrap();
     total_redelegated_bonded
         .at(&current_epoch.next())
         .at(&alice)
-        .insert(&mut storage, Epoch(3), token::Change::from(1))
+        .insert(&mut storage, Epoch(3), token::Amount::from(1))
         .unwrap();
     total_redelegated_unbonded
         .at(&current_epoch.next())
@@ -4459,11 +4459,11 @@ fn test_slash_validator() {
         .at(&current_epoch.next())
         .at(&current_epoch.next())
         .at(&alice)
-        .insert(&mut storage, Epoch(2), token::Change::from(4))
+        .insert(&mut storage, Epoch(2), token::Amount::from(4))
         .unwrap();
     total_bonded
         .get_data_handler()
-        .insert(&mut storage, current_epoch, token::Change::from(6))
+        .insert(&mut storage, current_epoch, token::Amount::from(6))
         .unwrap();
     let res = slash_validator(
         &storage,
@@ -4500,7 +4500,7 @@ fn test_slash_validator() {
     validator_deltas_handle(&bob)
         .set(
             &mut storage,
-            -infraction_stake,
+            -infraction_stake.change(),
             current_epoch.prev() - params.pipeline_len,
             params.pipeline_len,
         )
@@ -4529,9 +4529,9 @@ fn test_slash_validator() {
     assert_eq!(
         res,
         BTreeMap::from_iter([
-            (current_epoch, token::Change::zero()),
-            (current_epoch.next(), token::Change::zero()),
-            (current_epoch.next().next(), token::Change::zero())
+            (current_epoch, token::Amount::zero()),
+            (current_epoch.next(), token::Amount::zero()),
+            (current_epoch.next().next(), token::Amount::zero())
         ])
     );
 }
@@ -4556,7 +4556,7 @@ fn compute_amount_after_slashing_unbond_test() {
         Epoch(2),
         BTreeMap::from_iter([(
             alice.clone(),
-            BTreeMap::from_iter([(Epoch(1), token::Change::from(1))]),
+            BTreeMap::from_iter([(Epoch(1), token::Amount::from(1))]),
         )]),
     )]);
 
@@ -4678,7 +4678,7 @@ fn compute_amount_after_slashing_withdraw_test() {
                 // redelegations
                 BTreeMap::from_iter([(
                     alice.clone(),
-                    BTreeMap::from_iter([(Epoch(1), token::Change::from(1))]),
+                    BTreeMap::from_iter([(Epoch(1), token::Amount::from(1))]),
                 )]),
             ),
         ),
@@ -5038,7 +5038,7 @@ fn test_simple_redelegation_aux(
         .get(&storage, &(init_epoch + params.pipeline_len))
         .unwrap()
         .unwrap();
-    assert_eq!(redelegated, amount_redelegate.change());
+    assert_eq!(redelegated, amount_redelegate);
 
     let redel_start_epoch =
         validator_incoming_redelegations_handle(&dest_validator)
@@ -5160,10 +5160,7 @@ fn test_simple_redelegation_aux(
         .get(&storage, &bond_start)
         .unwrap()
         .unwrap_or_default();
-    assert_eq!(
-        redelegated_remaining,
-        amount_redelegate.change() - amount_unbond.change()
-    );
+    assert_eq!(redelegated_remaining, amount_redelegate - amount_unbond);
 
     let redel_unbonded = delegator_redelegated_unbonds_handle(&delegator)
         .at(&dest_validator)
@@ -5173,7 +5170,7 @@ fn test_simple_redelegation_aux(
         .get(&storage, &bond_start)
         .unwrap()
         .unwrap();
-    assert_eq!(redel_unbonded, amount_unbond.change());
+    assert_eq!(redel_unbonded, amount_unbond);
 
     dbg!(unbond_materialized, redelegation_end, bond_start);
     let total_redel_unbonded =
@@ -5184,7 +5181,7 @@ fn test_simple_redelegation_aux(
             .get(&storage, &bond_start)
             .unwrap()
             .unwrap();
-    assert_eq!(total_redel_unbonded, amount_unbond.change());
+    assert_eq!(total_redel_unbonded, amount_unbond);
 
     // Advance to withdrawal epoch
     loop {
@@ -5436,7 +5433,7 @@ fn test_redelegation_with_slashing_aux(
         .get(&storage, &(init_epoch + params.pipeline_len))
         .unwrap()
         .unwrap();
-    assert_eq!(redelegated, amount_redelegate.change());
+    assert_eq!(redelegated, amount_redelegate);
 
     let redel_start_epoch =
         validator_incoming_redelegations_handle(&dest_validator)
@@ -5575,10 +5572,7 @@ fn test_redelegation_with_slashing_aux(
         .get(&storage, &bond_start)
         .unwrap()
         .unwrap_or_default();
-    assert_eq!(
-        redelegated_remaining,
-        amount_redelegate.change() - amount_unbond.change()
-    );
+    assert_eq!(redelegated_remaining, amount_redelegate - amount_unbond);
 
     let redel_unbonded = delegator_redelegated_unbonds_handle(&delegator)
         .at(&dest_validator)
@@ -5588,7 +5582,7 @@ fn test_redelegation_with_slashing_aux(
         .get(&storage, &bond_start)
         .unwrap()
         .unwrap();
-    assert_eq!(redel_unbonded, amount_unbond.change());
+    assert_eq!(redel_unbonded, amount_unbond);
 
     dbg!(unbond_materialized, redelegation_end, bond_start);
     let total_redel_unbonded =
@@ -5599,7 +5593,7 @@ fn test_redelegation_with_slashing_aux(
             .get(&storage, &bond_start)
             .unwrap()
             .unwrap();
-    assert_eq!(total_redel_unbonded, amount_unbond.change());
+    assert_eq!(total_redel_unbonded, amount_unbond);
 
     // Advance to withdrawal epoch
     loop {
@@ -5726,7 +5720,7 @@ fn test_chain_redelegations_aux(mut validators: Vec<GenesisValidator>) {
             .get(&storage, &bond_start)
             .unwrap()
             .unwrap_or_default();
-    assert_eq!(del_total_redelegated_bonded, redel_amount_1.change());
+    assert_eq!(del_total_redelegated_bonded, redel_amount_1);
 
     // There should be delegator bonds for both src and dest validators
     let bonded_src = bond_handle(&delegator, &src_validator);
@@ -5736,14 +5730,14 @@ fn test_chain_redelegations_aux(mut validators: Vec<GenesisValidator>) {
             .get_delta_val(&storage, bond_start)
             .unwrap()
             .unwrap_or_default(),
-        (bond_amount - redel_amount_1).change()
+        bond_amount - redel_amount_1
     );
     assert_eq!(
         bonded_dest
             .get_delta_val(&storage, redel_end)
             .unwrap()
             .unwrap_or_default(),
-        redel_amount_1.change()
+        redel_amount_1
     );
 
     // The dest validator should have total redelegated bonded tokens
@@ -5754,7 +5748,7 @@ fn test_chain_redelegations_aux(mut validators: Vec<GenesisValidator>) {
             .get(&storage, &bond_start)
             .unwrap()
             .unwrap_or_default();
-    assert_eq!(dest_total_redelegated_bonded, redel_amount_1.change());
+    assert_eq!(dest_total_redelegated_bonded, redel_amount_1);
 
     // The dest validator's total bonded should not be updated by the
     // redelegation (should only have an entry for its genesis bond)
@@ -5773,7 +5767,7 @@ fn test_chain_redelegations_aux(mut validators: Vec<GenesisValidator>) {
             .get_delta_val(&storage, bond_start)
             .unwrap()
             .unwrap_or_default(),
-        bond_amount.change()
+        bond_amount
     );
 
     // The src validator should have a total unbonded entry due to the
@@ -5883,21 +5877,21 @@ fn test_chain_redelegations_aux(mut validators: Vec<GenesisValidator>) {
             .get_delta_val(&storage, bond_start)
             .unwrap()
             .unwrap_or_default(),
-        (bond_amount - redel_amount_1).change()
+        bond_amount - redel_amount_1
     );
     assert_eq!(
         bonded_dest
             .get_delta_val(&storage, redel_end)
             .unwrap()
             .unwrap_or_default(),
-        (redel_amount_1 - redel_amount_2).change()
+        redel_amount_1 - redel_amount_2
     );
     assert_eq!(
         bonded_dest2
             .get_delta_val(&storage, redel_2_end)
             .unwrap()
             .unwrap_or_default(),
-        redel_amount_2.change()
+        redel_amount_2
     );
 
     // There should be no unbond entries
@@ -5917,7 +5911,7 @@ fn test_chain_redelegations_aux(mut validators: Vec<GenesisValidator>) {
     // Delegator should have redelegated bonds due to both redelegations
     let del_redelegated_bonds = delegator_redelegated_bonds_handle(&delegator);
     assert_eq!(
-        Some((redel_amount_1 - redel_amount_2).change()),
+        Some(redel_amount_1 - redel_amount_2),
         del_redelegated_bonds
             .at(&dest_validator)
             .at(&redel_end)
@@ -5926,7 +5920,7 @@ fn test_chain_redelegations_aux(mut validators: Vec<GenesisValidator>) {
             .unwrap()
     );
     assert_eq!(
-        Some(redel_amount_2.change()),
+        Some(redel_amount_2),
         del_redelegated_bonds
             .at(&dest_validator_2)
             .at(&redel_2_end)
@@ -5958,8 +5952,8 @@ fn test_chain_redelegations_aux(mut validators: Vec<GenesisValidator>) {
             .get(&storage, &redel_end)
             .unwrap()
             .unwrap_or_default();
-    assert_eq!(dest_redelegated_bonded, redel_amount_1.change());
-    assert_eq!(dest2_redelegated_bonded, redel_amount_2.change());
+    assert_eq!(dest_redelegated_bonded, redel_amount_1);
+    assert_eq!(dest2_redelegated_bonded, redel_amount_2);
 
     // Total redelegated unbonded should be empty for all validator
     assert!(
@@ -5990,7 +5984,6 @@ fn test_from_sm_case_1() {
     let redeleg_src_2 = established_address_3();
     let owner = established_address_4();
     let unbond_amount = token::Amount::from(3130688);
-    let unbond_change = unbond_amount.change();
     println!(
         "Owner: {owner}\nValidator: {validator}\nRedeleg src 1: \
          {redeleg_src_1}\nRedeleg src 2: {redeleg_src_2}"
@@ -5999,12 +5992,12 @@ fn test_from_sm_case_1() {
     // Validator's incoming redelegations
     let outer_epoch_1 = Epoch(27);
     // from redeleg_src_1
-    let epoch_1_redeleg_1 = token::Change::from(8516);
+    let epoch_1_redeleg_1 = token::Amount::from(8516);
     // from redeleg_src_2
-    let epoch_1_redeleg_2 = token::Change::from(5704386);
+    let epoch_1_redeleg_2 = token::Amount::from(5704386);
     let outer_epoch_2 = Epoch(30);
     // from redeleg_src_2
-    let epoch_2_redeleg_2 = token::Change::from(1035191);
+    let epoch_2_redeleg_2 = token::Amount::from(1035191);
 
     // Insert the data - bonds and redelegated bonds
     let bonds_handle = bond_handle(&owner, &validator);
@@ -6047,7 +6040,7 @@ fn test_from_sm_case_1() {
     let bonds_to_unbond = find_bonds_to_remove(
         &storage,
         &bonds_handle.get_data_handler(),
-        unbond_change,
+        unbond_amount,
     )
     .unwrap();
     dbg!(&bonds_to_unbond);
@@ -6058,7 +6051,7 @@ fn test_from_sm_case_1() {
     // amouunt
     assert_eq!(
         epoch_1_redeleg_1 + epoch_1_redeleg_2 + epoch_2_redeleg_2
-            - unbond_change,
+            - unbond_amount,
         new_bond_amount
     );
     // The current bond should be sum of redelegations fom the modified epoch
@@ -6082,7 +6075,7 @@ fn test_from_sm_case_1() {
         validator_to_modify: Some(redeleg_src_2),
         epochs_to_remove: BTreeSet::from_iter([Epoch(18)]),
         epoch_to_modify: Some(Epoch(18)),
-        new_amount: Some(token::Change::from(3608889)),
+        new_amount: Some(token::Amount::from(3608889)),
     };
 
     pretty_assertions::assert_eq!(mr, exp_mr);

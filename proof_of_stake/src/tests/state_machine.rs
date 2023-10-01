@@ -57,7 +57,7 @@ type AbstractDelegatorRedelegatedBonded = BTreeMap<
     Address,
     BTreeMap<
         Address,
-        BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Change>>>,
+        BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Amount>>>,
     >,
 >;
 
@@ -108,13 +108,13 @@ struct AbstractPosState {
     genesis_validators: Vec<GenesisValidator>,
     /// Bonds delta values. The outer key for Epoch is pipeline offset from
     /// epoch in which the bond is applied
-    bonds: BTreeMap<BondId, BTreeMap<Epoch, token::Change>>,
+    bonds: BTreeMap<BondId, BTreeMap<Epoch, token::Amount>>,
     /// Total bonded tokens to a validator in each epoch. This is never
     /// decremented and used for slashing computations.
-    total_bonded: BTreeMap<Address, BTreeMap<Epoch, token::Change>>,
+    total_bonded: BTreeMap<Address, BTreeMap<Epoch, token::Amount>>,
     /// Validator stakes. These are NOT deltas.
     /// Pipelined.
-    validator_stakes: BTreeMap<Epoch, BTreeMap<Address, token::Change>>,
+    validator_stakes: BTreeMap<Epoch, BTreeMap<Address, token::Amount>>,
     /// Consensus validator set. Pipelined.
     consensus_set: BTreeMap<Epoch, BTreeMap<token::Amount, VecDeque<Address>>>,
     /// Below-capacity validator set. Pipelined.
@@ -1026,7 +1026,7 @@ impl ConcretePosState {
         #[allow(clippy::type_complexity)]
         let mut abs_del_redel_unbonds: BTreeMap<
             Epoch,
-            BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Change>>>,
+            BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Amount>>>,
         > = BTreeMap::new();
         ref_state
             .delegator_redelegated_unbonded
@@ -1048,7 +1048,7 @@ impl ConcretePosState {
                         abs_map
                             .entry(src.clone())
                             .or_default()
-                            .insert(*start, amount.change());
+                            .insert(*start, *amount);
                     }
                 }
             });
@@ -1089,38 +1089,16 @@ impl ConcretePosState {
                     .or_default()
                     .entry(src_val)
                     .or_default()
-                    .insert(bond_start, token::Amount::from(amount));
+                    .insert(bond_start, amount);
             });
         assert_eq!(abs_total_redel_bonded, conc_total_redel_bonded);
 
         // Check the validator total redelegated unbonded
-        #[allow(clippy::type_complexity)]
-        let mut abs_total_redel_unbonded: BTreeMap<
-            Epoch,
-            BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Change>>>,
-        > = BTreeMap::new();
-        ref_state
+        let abs_total_redel_unbonded = ref_state
             .validator_total_redelegated_unbonded
             .get(&id.validator)
             .cloned()
-            .unwrap_or_default()
-            .iter()
-            .for_each(|(redel_end_epoch, inner)| {
-                for (withdraw_epoch, rbonds) in inner {
-                    for (src, bonds) in rbonds {
-                        for (start, amount) in bonds {
-                            let inner_map = abs_total_redel_unbonded
-                                .entry(*redel_end_epoch)
-                                .or_default()
-                                .entry(*withdraw_epoch)
-                                .or_default()
-                                .entry(src.clone())
-                                .or_default();
-                            inner_map.insert(*start, amount.change());
-                        }
-                    }
-                }
-            });
+            .unwrap_or_default();
 
         let conc_total_redel_unbonded =
             crate::validator_total_redelegated_unbonded_handle(&id.validator)
@@ -1266,7 +1244,7 @@ impl ConcretePosState {
         #[allow(clippy::type_complexity)]
         let mut abs_del_redel_unbonds: BTreeMap<
             Epoch,
-            BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Change>>>,
+            BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Amount>>>,
         > = BTreeMap::new();
         ref_state
             .delegator_redelegated_unbonded
@@ -1288,7 +1266,7 @@ impl ConcretePosState {
                         abs_map
                             .entry(src.clone())
                             .or_default()
-                            .insert(*start, amount.change());
+                            .insert(*start, *amount);
                     }
                 }
             });
@@ -1664,7 +1642,7 @@ impl ConcretePosState {
                     .or_default()
                     .entry(src_val)
                     .or_default()
-                    .insert(bond_start, token::Amount::from(amount));
+                    .insert(bond_start, amount);
             });
         assert_eq!(abs_src_total_redel_bonded, conc_src_total_redel_bonded);
 
@@ -1698,38 +1676,16 @@ impl ConcretePosState {
                     .or_default()
                     .entry(src_val)
                     .or_default()
-                    .insert(bond_start, token::Amount::from(amount));
+                    .insert(bond_start, amount);
             });
         assert_eq!(abs_dest_total_redel_bonded, conc_dest_total_redel_bonded);
 
         // Check the src validator's total redelegated unbonded
-        #[allow(clippy::type_complexity)]
-        let mut abs_src_total_redel_unbonded: BTreeMap<
-            Epoch,
-            BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Change>>>,
-        > = BTreeMap::new();
-        ref_state
+        let abs_src_total_redel_unbonded = ref_state
             .validator_total_redelegated_unbonded
             .get(src_validator)
             .cloned()
-            .unwrap_or_default()
-            .iter()
-            .for_each(|(redel_end_epoch, inner)| {
-                for (withdraw_epoch, rbonds) in inner {
-                    for (src, bonds) in rbonds {
-                        for (start, amount) in bonds {
-                            let inner_map = abs_src_total_redel_unbonded
-                                .entry(*redel_end_epoch)
-                                .or_default()
-                                .entry(*withdraw_epoch)
-                                .or_default()
-                                .entry(src.clone())
-                                .or_default();
-                            inner_map.insert(*start, amount.change());
-                        }
-                    }
-                }
-            });
+            .unwrap_or_default();
 
         let conc_src_total_redel_unbonded =
             crate::validator_total_redelegated_unbonded_handle(src_validator)
@@ -1817,7 +1773,7 @@ impl ConcretePosState {
                     token::Amount::from_change(deltas_stake)
                 );
                 assert_eq!(
-                    bonded_stake.change(),
+                    bonded_stake,
                     ref_state
                         .validator_stakes
                         .get(&epoch)
@@ -1872,7 +1828,7 @@ impl ConcretePosState {
                     token::Amount::from_change(deltas_stake)
                 );
                 assert_eq!(
-                    bonded_stake.change(),
+                    bonded_stake,
                     ref_state
                         .validator_stakes
                         .get(&epoch)
@@ -1924,10 +1880,10 @@ impl ConcretePosState {
                 )
                 .unwrap()
             {
-                let stake = validator_deltas_handle(&validator)
-                    .get_sum(&self.s, epoch, params)
-                    .unwrap()
-                    .unwrap_or_default();
+                let stake = crate::read_validator_stake(
+                    &self.s, params, &validator, epoch,
+                )
+                .unwrap();
                 tracing::debug!(
                     "Below-thresh val {}, stake {}",
                     &validator,
@@ -1986,10 +1942,10 @@ impl ConcretePosState {
                             .cloned()
                             .unwrap()
                     );
-                    let stake = validator_deltas_handle(&validator)
-                        .get_sum(&self.s, epoch, params)
-                        .unwrap()
-                        .unwrap_or_default();
+                    let stake = crate::read_validator_stake(
+                        &self.s, params, &validator, epoch,
+                    )
+                    .unwrap();
                     tracing::debug!(
                         "Jailed val {}, stake {}",
                         &validator,
@@ -2080,16 +2036,15 @@ impl ReferenceStateMachine for AbstractPosState {
                             validator: address.clone(),
                         })
                         .or_default();
-                    bonds.insert(epoch, token::Change::from(tokens));
+                    bonds.insert(epoch, tokens);
 
                     let total_bonded =
                         state.total_bonded.entry(address.clone()).or_default();
-                    total_bonded.insert(epoch, tokens.change());
+                    total_bonded.insert(epoch, tokens);
 
                     let total_stakes =
                         state.validator_stakes.entry(epoch).or_default();
-                    total_stakes
-                        .insert(address.clone(), token::Change::from(tokens));
+                    total_stakes.insert(address.clone(), tokens);
 
                     let consensus_set =
                         state.consensus_set.entry(epoch).or_default();
@@ -2259,7 +2214,8 @@ impl ReferenceStateMachine for AbstractPosState {
             let arb_unbondable = prop::sample::select(unbondable);
             let arb_unbond =
                 arb_unbondable.prop_flat_map(move |(id, deltas_sum)| {
-                    let deltas_sum = i128::try_from(deltas_sum).unwrap();
+                    let deltas_sum =
+                        i128::try_from(deltas_sum.change()).unwrap();
                     // Generate an amount to unbond, up to the sum
                     assert!(
                         deltas_sum > 0,
@@ -2303,7 +2259,8 @@ impl ReferenceStateMachine for AbstractPosState {
             let incoming_redelegations = state.incoming_redelegations.clone();
             let arb_redelegation =
                 arb_redelegatable.prop_flat_map(move |(id, deltas_sum)| {
-                    let deltas_sum = i128::try_from(deltas_sum).unwrap();
+                    let deltas_sum =
+                        i128::try_from(deltas_sum.change()).unwrap();
                     // Generate an amount to redelegate, up to the sum
                     assert!(
                         deltas_sum > 0,
@@ -2382,7 +2339,7 @@ impl ReferenceStateMachine for AbstractPosState {
                     .validator_stakes
                     .entry(pipeline)
                     .or_default()
-                    .insert(address.clone(), 0_i128.into());
+                    .insert(address.clone(), token::Amount::zero());
 
                 // Insert into the below-threshold set at pipeline since the
                 // initial stake is 0
@@ -2407,7 +2364,6 @@ impl ReferenceStateMachine for AbstractPosState {
                 );
 
                 if !amount.is_zero() {
-                    let change = token::Change::from(*amount);
                     let pipeline_state = state
                         .validator_states
                         .get(&state.pipeline())
@@ -2420,11 +2376,14 @@ impl ReferenceStateMachine for AbstractPosState {
                         state.update_validator_sets(
                             state.pipeline(),
                             &id.validator,
-                            change,
+                            amount.change(),
                         );
                     }
-                    state.update_bond(id, change);
-                    state.update_validator_total_stake(&id.validator, change);
+                    state.update_bond(id, *amount);
+                    state.update_validator_total_stake(
+                        &id.validator,
+                        amount.change(),
+                    );
                 }
                 state.debug_validators();
             }
@@ -2441,15 +2400,14 @@ impl ReferenceStateMachine for AbstractPosState {
                     .get(id)
                     .map(|a| {
                         a.iter()
-                            .fold(token::Change::zero(), |acc, (_, amount)| {
+                            .fold(token::Amount::zero(), |acc, (_, amount)| {
                                 acc + *amount
                             })
                     })
                     .unwrap_or_default();
 
-                if !amount.is_zero() && amount.change() <= sum_bonded {
-                    let change = token::Change::from(*amount);
-                    state.update_state_with_unbond(id, change);
+                if !amount.is_zero() && *amount <= sum_bonded {
+                    state.update_state_with_unbond(id, *amount);
                 }
                 state.debug_validators();
             }
@@ -2504,11 +2462,10 @@ impl ReferenceStateMachine for AbstractPosState {
                 }
                 if !amount.is_zero() {
                     // Remove the amount from source validator
-                    let change = token::Change::from(*amount);
                     state.update_state_with_redelegation(
                         id,
                         new_validator,
-                        change,
+                        *amount,
                     );
                 }
                 state.debug_validators();
@@ -2554,15 +2511,13 @@ impl ReferenceStateMachine for AbstractPosState {
                 // Remove from the validator set starting at the next epoch and
                 // up thru the pipeline
                 for offset in 1..=state.params.pipeline_len {
-                    let real_stake = token::Amount::from_change(
-                        state
-                            .validator_stakes
-                            .get(&(current_epoch + offset))
-                            .unwrap()
-                            .get(address)
-                            .cloned()
-                            .unwrap_or_default(),
-                    );
+                    let real_stake = state
+                        .validator_stakes
+                        .get(&(current_epoch + offset))
+                        .unwrap()
+                        .get(address)
+                        .cloned()
+                        .unwrap_or_default();
 
                     if let Some((index, stake)) = state
                         .is_in_consensus_w_info(address, current_epoch + offset)
@@ -2719,9 +2674,7 @@ impl ReferenceStateMachine for AbstractPosState {
                         sum + validators.len() as u64
                     });
 
-                if pipeline_stake
-                    < state.params.validator_stake_threshold.change()
-                {
+                if pipeline_stake < state.params.validator_stake_threshold {
                     // Place into the below-threshold set
                     let below_threshold_set_pipeline = state
                         .below_threshold_set
@@ -2742,7 +2695,7 @@ impl ReferenceStateMachine for AbstractPosState {
                             .is_empty()
                     );
                     consensus_set_pipeline
-                        .entry(token::Amount::from_change(pipeline_stake))
+                        .entry(pipeline_stake)
                         .or_default()
                         .push_back(address.clone());
                     validator_states_pipeline
@@ -2756,7 +2709,7 @@ impl ReferenceStateMachine for AbstractPosState {
                         .or_default();
 
                     let min_consensus_stake = *min_consensus.key();
-                    if pipeline_stake > min_consensus_stake.change() {
+                    if pipeline_stake > min_consensus_stake {
                         // Place into the consensus set and demote the last
                         // min_consensus validator
                         let min_validators = min_consensus.get_mut();
@@ -2774,7 +2727,7 @@ impl ReferenceStateMachine for AbstractPosState {
                             .insert(last_val, ValidatorState::BelowCapacity);
 
                         consensus_set_pipeline
-                            .entry(token::Amount::from_change(pipeline_stake))
+                            .entry(pipeline_stake)
                             .or_default()
                             .push_back(address.clone());
                         validator_states_pipeline
@@ -2782,10 +2735,7 @@ impl ReferenceStateMachine for AbstractPosState {
                     } else {
                         // Just place into the below-capacity set
                         below_capacity_set_pipeline
-                            .entry(
-                                token::Amount::from_change(pipeline_stake)
-                                    .into(),
-                            )
+                            .entry(pipeline_stake.into())
                             .or_default()
                             .push_back(address.clone());
                         validator_states_pipeline.insert(
@@ -2841,7 +2791,7 @@ impl ReferenceStateMachine for AbstractPosState {
                 let is_unbondable = state
                     .bond_sums()
                     .get(id)
-                    .map(|sum| *sum >= token::Change::from(*amount))
+                    .map(|sum| *sum >= *amount)
                     .unwrap_or_default();
 
                 // The validator must not be frozen currently
@@ -2921,7 +2871,7 @@ impl ReferenceStateMachine for AbstractPosState {
                     if !state
                         .bond_sums()
                         .get(id)
-                        .map(|sum| *sum >= token::Change::from(*amount))
+                        .map(|sum| *sum >= *amount)
                         .unwrap_or_default()
                     {
                         return false;
@@ -3116,7 +3066,7 @@ impl AbstractPosState {
     }
 
     /// Update a bond with bonded or unbonded change at the pipeline epoch
-    fn update_bond(&mut self, id: &BondId, change: token::Change) {
+    fn update_bond(&mut self, id: &BondId, change: token::Amount) {
         let pipeline_epoch = self.pipeline();
         let bonds = self.bonds.entry(id.clone()).or_default();
         let bond = bonds.entry(pipeline_epoch).or_default();
@@ -3135,7 +3085,7 @@ impl AbstractPosState {
         *total_bonded += change;
     }
 
-    fn update_state_with_unbond(&mut self, id: &BondId, change: token::Change) {
+    fn update_state_with_unbond(&mut self, id: &BondId, change: token::Amount) {
         self.unbond_tokens(id, change, false);
 
         // let pipeline_epoch = self.pipeline();
@@ -3458,7 +3408,7 @@ impl AbstractPosState {
     fn unbond_tokens(
         &mut self,
         id: &BondId,
-        change: token::Change,
+        change: token::Amount,
         is_redelegation: bool,
     ) -> ResultSlashing {
         // TODO: check in here too that the amount is less or equal to bond sum
@@ -3524,10 +3474,6 @@ impl AbstractPosState {
         // compute if necessary
         let modified_redelegation = match bonds_to_remove.new_entry {
             Some((bond_epoch, new_bond_amount)) => {
-                // tracing::debug!(
-                //     "\n New redel entry for epoch {} -> amount {}",
-                //     bond_epoch, new_bond_amount
-                // );
                 if delegator_redelegated_bonds.contains_key(&bond_epoch) {
                     let cur_bond_amount =
                         bonds.get(&bond_epoch).cloned().unwrap_or_default();
@@ -3571,7 +3517,7 @@ impl AbstractPosState {
                 };
                 ((start, withdraw_epoch), new_value)
             })
-            .collect::<BTreeMap<(Epoch, Epoch), token::Change>>();
+            .collect::<BTreeMap<(Epoch, Epoch), token::Amount>>();
 
         // Update the bonds and unbonds in the AbstractState
         // `updatedBonded` + updates to `updatedDelegator`
@@ -3590,7 +3536,7 @@ impl AbstractPosState {
                     .or_default()
                     .entry(id.clone())
                     .or_default();
-                *unbonds += token::Amount::from(*amount)
+                *unbonds += *amount;
             }
         }
 
@@ -3695,7 +3641,7 @@ impl AbstractPosState {
                             .or_default()
                             .entry(*src_start)
                             .or_default();
-                        *existing_unbonded += token::Amount::from(*unbonded);
+                        *existing_unbonded += *unbonded;
                     }
                 }
             }
@@ -3709,7 +3655,7 @@ impl AbstractPosState {
             *cur_total_bonded -= *unbonded;
             let cur_total_unbonded =
                 total_unbonded.entry(*start_epoch).or_default();
-            *cur_total_unbonded += token::Amount::from(*unbonded);
+            *cur_total_unbonded += *unbonded;
         }
 
         // `updatedTotalRedelegatedBonded` and `updatedTotalRedelegatedUnbonded`
@@ -3724,7 +3670,7 @@ impl AbstractPosState {
                         .or_default()
                         .entry(*bond_start)
                         .or_default();
-                    *cur_total_bonded -= token::Amount::from(*change);
+                    *cur_total_bonded -= *change;
 
                     let cur_total_unbonded =
                         validator_total_redelegated_unbonded
@@ -3734,7 +3680,7 @@ impl AbstractPosState {
                             .or_default()
                             .entry(*bond_start)
                             .or_default();
-                    *cur_total_unbonded += token::Amount::from(*change);
+                    *cur_total_unbonded += *change;
                 }
             }
         }
@@ -3777,7 +3723,7 @@ impl AbstractPosState {
         &mut self,
         id: &BondId,
         new_validator: &Address,
-        change: token::Change,
+        change: token::Amount,
     ) {
         // First need to unbond the redelegated tokens
         // NOTE: same logic as unbond transition but with some things left out
@@ -3787,8 +3733,7 @@ impl AbstractPosState {
         let result_unbond = self.unbond_tokens(id, change, true);
 
         // `amountAfterSlashing`
-        let amount_after_slashing = result_unbond.sum.change();
-        debug_assert!(amount_after_slashing.non_negative());
+        let amount_after_slashing = result_unbond.sum;
 
         // `updatedRedelegatedBonds`
         // Update the delegator's redelegated bonded
@@ -3805,7 +3750,7 @@ impl AbstractPosState {
         for (start_epoch, bonded) in &result_unbond.epoch_map {
             *delegator_redelegated_bonded
                 .entry(*start_epoch)
-                .or_default() += (*bonded).into();
+                .or_default() += *bonded;
         }
 
         if !amount_after_slashing.is_zero() {
@@ -3885,12 +3830,12 @@ impl AbstractPosState {
                 self.update_validator_sets(
                     self.pipeline(),
                     new_validator,
-                    amount_after_slashing,
+                    amount_after_slashing.change(),
                 );
             }
             self.update_validator_total_stake(
                 new_validator,
-                amount_after_slashing,
+                amount_after_slashing.change(),
             );
         }
 
@@ -4248,7 +4193,7 @@ impl AbstractPosState {
             .or_default()
             .entry(validator.clone())
             .or_default();
-        *total_stakes += change;
+        *total_stakes = token::Amount::from(total_stakes.change() + change);
     }
 
     /// Update validator in sets with bonded or unbonded change
@@ -4280,8 +4225,7 @@ impl AbstractPosState {
 
         let this_val_stake_pre = *validator_stakes.get(validator).unwrap();
         let this_val_stake_post =
-            token::Amount::from_change(this_val_stake_pre + change);
-        let this_val_stake_pre = token::Amount::from_change(this_val_stake_pre);
+            token::Amount::from_change(this_val_stake_pre.change() + change);
 
         let threshold = self.params.validator_stake_threshold;
         if this_val_stake_pre < threshold && this_val_stake_post < threshold {
@@ -4554,10 +4498,7 @@ impl AbstractPosState {
             },
         );
 
-        let mut map_validator_slash: BTreeMap<
-            Address,
-            BTreeMap<Epoch, token::Change>,
-        > = BTreeMap::new();
+        let mut map_validator_slash: EagerRedelegatedBondsMap = BTreeMap::new();
         for (validator, rate) in slash_rates {
             self.process_validator_slash(
                 &validator,
@@ -4579,7 +4520,7 @@ impl AbstractPosState {
                     self.update_validator_sets(
                         update_epoch,
                         &validator,
-                        -delta,
+                        -delta.change(),
                     );
                 }
 
@@ -4635,10 +4576,7 @@ impl AbstractPosState {
         &mut self,
         validator: &Address,
         slash_rate: Dec,
-        val_slash_amounts: &mut BTreeMap<
-            Address,
-            BTreeMap<Epoch, token::Change>,
-        >,
+        val_slash_amounts: &mut EagerRedelegatedBondsMap,
     ) {
         let slash_amounts = val_slash_amounts
             .get(validator)
@@ -4692,8 +4630,8 @@ impl AbstractPosState {
         &self,
         validator: &Address,
         slash_rate: Dec,
-        val_slash_amounts: &BTreeMap<Epoch, token::Change>,
-    ) -> BTreeMap<Epoch, token::Change> {
+        val_slash_amounts: &BTreeMap<Epoch, token::Amount>,
+    ) -> BTreeMap<Epoch, token::Amount> {
         tracing::debug!(
             "Slashing validator {} at rate {}",
             validator,
@@ -4757,7 +4695,7 @@ impl AbstractPosState {
             .collect::<Vec<_>>();
         for epoch in eps.into_iter().rev() {
             let amount = total_bonded.iter().fold(
-                token::Change::zero(),
+                token::Amount::zero(),
                 |acc, (bond_start, bond_amount)| {
                     let redel_bonds = total_redelegated_bonded
                         .get(bond_start)
@@ -4767,7 +4705,7 @@ impl AbstractPosState {
                         epoch,
                         infraction_epoch,
                         *bond_start,
-                        token::Amount::from(*bond_amount),
+                        *bond_amount,
                         &redel_bonds,
                         slash_rate,
                         validator,
@@ -4780,7 +4718,6 @@ impl AbstractPosState {
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|(ep, _)| *ep <= infraction_epoch)
-                .map(|(ep, amount)| (ep, amount.change()))
                 .collect::<BTreeMap<_, _>>();
             let new_redelegated_bonds = new_bonds
                 .keys()
@@ -4806,10 +4743,10 @@ impl AbstractPosState {
 
             total_bonded = new_bonds;
             total_redelegated_bonded = new_redelegated_bonds;
-            sum += token::Amount::from(amount);
+            sum += amount;
 
             let cur = slashed_amounts.entry(epoch).or_default();
-            *cur += sum.change();
+            *cur += sum;
         }
         // Hack - should this be done differently? (think this is safe)
         let last_amt = slashed_amounts
@@ -5143,12 +5080,11 @@ impl AbstractPosState {
                     .sort_by(|s1, s2| s1.epoch.partial_cmp(&s2.epoch).unwrap());
 
                 result.total_redelegated += *bonded;
-                result.total_after_slashing +=
-                    token::Amount::from(Self::apply_slashes_to_amount(
-                        &self.params,
-                        &merged,
-                        bonded.change(),
-                    ));
+                result.total_after_slashing += Self::apply_slashes_to_amount(
+                    &self.params,
+                    &merged,
+                    *bonded,
+                );
             }
         }
         result
@@ -5161,7 +5097,7 @@ impl AbstractPosState {
         amount: token::Amount,
         redel_bonds: &BTreeMap<Address, BTreeMap<Epoch, token::Amount>>,
         validator: &Address,
-    ) -> token::Change {
+    ) -> token::Amount {
         // `val list_slashes`
         let list_slashes = self
             .validator_slashes
@@ -5195,10 +5131,10 @@ impl AbstractPosState {
         let after_not_redelegated = Self::apply_slashes_to_amount(
             &self.params,
             &list_slashes,
-            total_not_redelegated.change(),
+            total_not_redelegated,
         );
 
-        after_not_redelegated + result_fold.total_after_slashing.change()
+        after_not_redelegated + result_fold.total_after_slashing
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -5211,7 +5147,7 @@ impl AbstractPosState {
         redel_bonds: &BTreeMap<Address, BTreeMap<Epoch, token::Amount>>,
         slash_rate: Dec,
         validator: &Address,
-    ) -> token::Change {
+    ) -> token::Amount {
         let amount_due = self
             .compute_bond_at_epoch(
                 infraction_epoch,
@@ -5237,7 +5173,7 @@ impl AbstractPosState {
         validator: &Address,
         dest_validator: &Address,
         slash_rate: Dec,
-        slash_amounts: &mut BTreeMap<Epoch, token::Change>,
+        slash_amounts: &mut BTreeMap<Epoch, token::Amount>,
     ) {
         // tracing::debug!("\nSLASHING VAL REDELEGATIONS\n");
 
@@ -5285,7 +5221,7 @@ impl AbstractPosState {
             ) && src_start_epoch <= infraction_epoch
             {
                 self.slash_redelegation(
-                    amount.change(),
+                    amount,
                     src_start_epoch,
                     self.params.redelegation_end_epoch_from_start(redel_start),
                     validator,
@@ -5302,19 +5238,19 @@ impl AbstractPosState {
     #[allow(clippy::too_many_arguments)]
     fn slash_redelegation(
         &self,
-        amount: token::Change,
+        amount: token::Amount,
         bond_start: Epoch,
         redel_bond_start: Epoch,
         src_validator: &Address,
         slash_rate: Dec,
         slashes: &[Slash],
         dest_total_redelegated_unbonded: &AbstractTotalRedelegatedUnbonded,
-        slash_amounts: &mut BTreeMap<Epoch, token::Change>,
+        slash_amounts: &mut BTreeMap<Epoch, token::Amount>,
     ) {
         tracing::debug!(
             "\nSLASH REDELEGATION AMOUNT {} - BOND START {} and \
              redel_bond_start {}\n",
-            amount,
+            amount.to_string_native(),
             bond_start,
             redel_bond_start
         );
@@ -5328,7 +5264,7 @@ impl AbstractPosState {
         let set_update_epoch = self.epoch.next();
 
         // Do initial computation of total unbonded
-        let mut tot_unbonded = token::Change::zero();
+        let mut tot_unbonded = token::Amount::zero();
         for epoch in Epoch::iter_bounds_inclusive(
             infraction_epoch.next(),
             set_update_epoch,
@@ -5349,13 +5285,15 @@ impl AbstractPosState {
                         .unwrap()
                         .get(&bond_start)
                         .cloned()
-                        .unwrap()
-                        .change();
+                        .unwrap();
                 }
             }
         }
         // dbg!(&slash_amounts);
-        tracing::debug!("init_tot_unbonded = {}", tot_unbonded);
+        tracing::debug!(
+            "init_tot_unbonded = {}",
+            tot_unbonded.to_string_native()
+        );
 
         for epoch in
             Epoch::iter_range(set_update_epoch, self.params.pipeline_len)
@@ -5382,11 +5320,10 @@ impl AbstractPosState {
                         .get(&bond_start)
                         .cloned()
                         .unwrap()
-                        .change()
             };
             tracing::debug!(
                 "updated_total_unbonded = {}",
-                updated_total_unbonded
+                updated_total_unbonded.to_string_native()
             );
             let list_slashes = slashes
                 .iter()
@@ -5405,18 +5342,17 @@ impl AbstractPosState {
                 .cloned()
                 .collect::<Vec<_>>();
             // dbg!(&list_slashes);
+            let slashable_amount = amount
+                .checked_sub(updated_total_unbonded)
+                .unwrap_or_default();
 
-            let slashable_amount = cmp::max(
-                token::Change::zero(),
-                amount - updated_total_unbonded,
-            );
             let slashed = Self::apply_slashes_to_amount(
                 &self.params,
                 &list_slashes,
                 slashable_amount,
             )
             .mul_ceil(slash_rate);
-            tracing::debug!("slashed = {}", slashed);
+            tracing::debug!("slashed = {}", slashed.to_string_native());
             let list_slashes = slashes
                 .iter()
                 .filter(|&slash| {
@@ -5440,7 +5376,10 @@ impl AbstractPosState {
                 slashable_amount,
             )
             .mul_ceil(slash_rate);
-            tracing::debug!("slashable stake = {}", slashable_stake);
+            tracing::debug!(
+                "slashable stake = {}",
+                slashable_stake.to_string_native()
+            );
 
             tot_unbonded = updated_total_unbonded;
 
@@ -5798,9 +5737,9 @@ impl AbstractPosState {
     }
 
     /// Find the sums of the bonds across all epochs
-    fn bond_sums(&self) -> BTreeMap<BondId, token::Change> {
+    fn bond_sums(&self) -> BTreeMap<BondId, token::Amount> {
         self.bonds.iter().fold(
-            BTreeMap::<BondId, token::Change>::new(),
+            BTreeMap::<BondId, token::Amount>::new(),
             |mut acc, (id, bonds)| {
                 for delta in bonds.values() {
                     let entry = acc.entry(id.clone()).or_default();
@@ -5869,14 +5808,13 @@ impl AbstractPosState {
             let enqueued_slashes = self.enqueued_slashes.get(&processing_epoch);
             if let Some(enqueued_slashes) = enqueued_slashes {
                 for (validator, slashes) in enqueued_slashes.iter() {
-                    let val_stake = token::Amount::from_change(
-                        self.validator_stakes
-                            .get(&epoch)
-                            .unwrap()
-                            .get(validator)
-                            .cloned()
-                            .unwrap_or_default(),
-                    );
+                    let val_stake = self
+                        .validator_stakes
+                        .get(&epoch)
+                        .unwrap()
+                        .get(validator)
+                        .cloned()
+                        .unwrap_or_default();
                     tracing::debug!(
                         "Val {} stake epoch {}: {}",
                         &validator,
@@ -5931,10 +5869,7 @@ impl AbstractPosState {
                         deltas_stake.to_string_native(),
                         val_state
                     );
-                    debug_assert_eq!(
-                        *amount,
-                        token::Amount::from_change(*deltas_stake)
-                    );
+                    debug_assert_eq!(*amount, *deltas_stake);
                     debug_assert_eq!(*val_state, ValidatorState::Consensus);
                 }
             }
@@ -5967,7 +5902,7 @@ impl AbstractPosState {
                     );
                     debug_assert_eq!(
                         token::Amount::from(*amount),
-                        token::Amount::from_change(deltas_stake)
+                        deltas_stake
                     );
                     debug_assert_eq!(*val_state, ValidatorState::BelowCapacity);
                 }
@@ -6064,8 +5999,8 @@ impl AbstractPosState {
     }
 
     fn find_bonds_to_remove(
-        bonds: &BTreeMap<Epoch, token::Change>,
-        amount: token::Change,
+        bonds: &BTreeMap<Epoch, token::Amount>,
+        amount: token::Amount,
     ) -> BondsForRemovalRes {
         let mut bonds_for_removal = BondsForRemovalRes::default();
         let mut remaining = amount;
@@ -6089,10 +6024,10 @@ impl AbstractPosState {
     fn compute_modified_redelegation(
         delegator_redelegated_bonds: &mut BTreeMap<
             Epoch,
-            BTreeMap<Address, BTreeMap<Epoch, token::Change>>,
+            BTreeMap<Address, BTreeMap<Epoch, token::Amount>>,
         >,
         bond_epoch: Epoch,
-        amount: token::Change,
+        amount: token::Amount,
     ) -> ModifiedRedelegation {
         let mut modified_redelegation = ModifiedRedelegation::default();
 
@@ -6100,12 +6035,12 @@ impl AbstractPosState {
             delegator_redelegated_bonds.entry(bond_epoch).or_default();
         let (src_validators, total_redelegated) =
             redelegated_bonds.iter().fold(
-                (BTreeSet::<Address>::new(), token::Change::zero()),
+                (BTreeSet::<Address>::new(), token::Amount::zero()),
                 |mut acc, (src_val, redel_bonds)| {
                     acc.0.insert(src_val.clone());
                     acc.1 += redel_bonds
                         .values()
-                        .fold(token::Change::zero(), |sum, val| sum + *val);
+                        .fold(token::Amount::zero(), |sum, val| sum + *val);
                     acc
                 },
             );
@@ -6123,7 +6058,7 @@ impl AbstractPosState {
             }
             let bonds = redelegated_bonds.get(&src_val).unwrap();
             let total_src_amount =
-                bonds.values().cloned().sum::<token::Change>();
+                bonds.values().cloned().sum::<token::Amount>();
 
             modified_redelegation
                 .validators_to_remove
@@ -6135,7 +6070,7 @@ impl AbstractPosState {
                 let src_bonds_to_remove =
                     Self::find_bonds_to_remove(bonds, remaining);
 
-                remaining = token::Change::zero();
+                remaining = token::Amount::zero();
 
                 if let Some((bond_epoch, new_bond_amount)) =
                     src_bonds_to_remove.new_entry
@@ -6162,11 +6097,11 @@ impl AbstractPosState {
     fn compute_new_redelegated_unbonds(
         redelegated_bonds: &mut BTreeMap<
             Epoch,
-            BTreeMap<Address, BTreeMap<Epoch, token::Change>>,
+            BTreeMap<Address, BTreeMap<Epoch, token::Amount>>,
         >,
         epochs_to_remove: &BTreeSet<Epoch>,
         modified_redelegation: &ModifiedRedelegation,
-    ) -> BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Change>>>
+    ) -> BTreeMap<Epoch, BTreeMap<Address, BTreeMap<Epoch, token::Amount>>>
     {
         let unbonded_epochs = if let Some(epoch) = modified_redelegation.epoch {
             let mut epochs = epochs_to_remove.clone();
@@ -6277,10 +6212,10 @@ impl AbstractPosState {
         params: &PosParams,
         all_slashes: &BTreeMap<Address, Vec<Slash>>,
         validator: &Address,
-        new_unbonds: &BTreeMap<(Epoch, Epoch), token::Change>,
+        new_unbonds: &BTreeMap<(Epoch, Epoch), token::Amount>,
         new_redelegated_unbonded: &BTreeMap<
             Epoch,
-            BTreeMap<Address, BTreeMap<Epoch, token::Change>>,
+            BTreeMap<Address, BTreeMap<Epoch, token::Amount>>,
         >,
     ) -> ResultSlashing {
         let mut result_slashing = ResultSlashing::default();
@@ -6296,7 +6231,7 @@ impl AbstractPosState {
             // Begin the logic for `fold_and_slash_redelegated_bonds`
             let result_fold = {
                 let (mut total_redelegated, mut total_after_slashing) =
-                    (token::Change::zero(), token::Change::zero());
+                    (token::Amount::zero(), token::Amount::zero());
 
                 for (src_validator, unbonded_map) in new_redelegated_unbonded
                     .get(start_epoch)
@@ -6338,27 +6273,24 @@ impl AbstractPosState {
                 }
 
                 FoldRedelegatedBondsResult {
-                    total_redelegated: token::Amount::from(total_redelegated),
-                    total_after_slashing: token::Amount::from(
-                        total_after_slashing,
-                    ),
+                    total_redelegated,
+                    total_after_slashing,
                 }
             };
 
             let total_not_redelegated =
-                *to_unbond - result_fold.total_redelegated.change();
+                *to_unbond - result_fold.total_redelegated;
             let after_not_redelegated = Self::apply_slashes_to_amount(
                 params,
                 &slashes,
                 total_not_redelegated,
             );
-            let amount_after_slashing = after_not_redelegated
-                + result_fold.total_after_slashing.change();
-            result_slashing.sum += token::Amount::from(amount_after_slashing);
-            result_slashing.epoch_map.insert(
-                *start_epoch,
-                token::Amount::from(amount_after_slashing),
-            );
+            let amount_after_slashing =
+                after_not_redelegated + result_fold.total_after_slashing;
+            result_slashing.sum += amount_after_slashing;
+            result_slashing
+                .epoch_map
+                .insert(*start_epoch, amount_after_slashing);
         }
 
         result_slashing
@@ -6367,10 +6299,10 @@ impl AbstractPosState {
     fn apply_slashes_to_amount(
         params: &PosParams,
         slashes: &[Slash],
-        amount: token::Change,
-    ) -> token::Change {
+        amount: token::Amount,
+    ) -> token::Amount {
         let mut final_amount = amount;
-        let mut computed_slashes = BTreeMap::<Epoch, token::Change>::new();
+        let mut computed_slashes = BTreeMap::<Epoch, token::Amount>::new();
         for slash in slashes {
             let slashed_amount = Self::compute_slashable_amount(
                 params,
@@ -6379,7 +6311,8 @@ impl AbstractPosState {
                 &computed_slashes,
             );
             final_amount =
-                cmp::max(token::Change::zero(), final_amount - slashed_amount);
+                final_amount.checked_sub(slashed_amount).unwrap_or_default();
+
             computed_slashes.insert(slash.epoch, slashed_amount);
         }
         final_amount
@@ -6388,9 +6321,9 @@ impl AbstractPosState {
     fn compute_slashable_amount(
         params: &PosParams,
         slash: &Slash,
-        amount: token::Change,
-        computed_slashes: &BTreeMap<Epoch, token::Change>,
-    ) -> token::Change {
+        amount: token::Amount,
+        computed_slashes: &BTreeMap<Epoch, token::Amount>,
+    ) -> token::Amount {
         let updated_amount = computed_slashes
             .iter()
             .filter(|(&epoch, _)| {
@@ -6399,7 +6332,7 @@ impl AbstractPosState {
                 epoch + params.slash_processing_epoch_offset() <= slash.epoch
             })
             .fold(amount, |acc, (_, amnt)| {
-                cmp::max(token::Change::zero(), acc - *amnt)
+                acc.checked_sub(*amnt).unwrap_or_default()
             });
         updated_amount.mul_ceil(slash.rate)
     }

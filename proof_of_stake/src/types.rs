@@ -149,7 +149,7 @@ pub type CommissionRates =
 
 /// Epoched validator's bonds
 pub type Bonds = crate::epoched::EpochedDelta<
-    token::Change,
+    token::Amount,
     crate::epoched::OffsetPipelineLen,
     U64_MAX,
 >;
@@ -234,7 +234,7 @@ pub type TotalRedelegatedUnbonded = NestedMap<Epoch, RedelegatedBondsOrUnbonds>;
 ///
 /// - redelegation source validator
 /// - start epoch of the bond that's been redelegated
-pub type RedelegatedTokens = NestedMap<Address, LazyMap<Epoch, token::Change>>;
+pub type RedelegatedTokens = NestedMap<Address, LazyMap<Epoch, token::Amount>>;
 
 /// Map of redelegated bonds or unbonds.
 /// The map keys from outside in are:
@@ -278,7 +278,7 @@ pub type DelegatorRedelegatedUnbonded =
 /// - src validator address
 /// - src bond start epoch where it started contributing to src validator
 pub type EagerRedelegatedBondsMap =
-    BTreeMap<Address, BTreeMap<Epoch, token::Change>>;
+    BTreeMap<Address, BTreeMap<Epoch, token::Amount>>;
 
 #[derive(
     Debug, Clone, BorshSerialize, BorshDeserialize, Eq, Hash, PartialEq,

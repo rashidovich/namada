@@ -173,13 +173,11 @@ mod tests {
             )?);
             epoched_src_bonds_pre.push(
                 bond_handle(&redelegation.owner, &redelegation.src_validator)
-                    .get_delta_val(ctx(), Epoch(epoch))?
-                    .map(token::Amount::from_change),
+                    .get_delta_val(ctx(), Epoch(epoch))?,
             );
             epoched_dest_bonds_pre.push(
                 bond_handle(&redelegation.owner, &redelegation.src_validator)
-                    .get_delta_val(ctx(), Epoch(epoch))?
-                    .map(token::Amount::from_change),
+                    .get_delta_val(ctx(), Epoch(epoch))?,
             );
             epoched_validator_set_pre.push(
                 read_consensus_validator_set_addresses_with_stake(
@@ -204,13 +202,11 @@ mod tests {
         for epoch in 0..=pos_params.unbonding_len {
             epoched_src_bonds_post.push(
                 bond_handle(&redelegation.owner, &redelegation.src_validator)
-                    .get_delta_val(ctx(), Epoch(epoch))?
-                    .map(token::Amount::from_change),
+                    .get_delta_val(ctx(), Epoch(epoch))?,
             );
             epoched_dest_bonds_post.push(
                 bond_handle(&redelegation.owner, &redelegation.dest_validator)
-                    .get_delta_val(ctx(), Epoch(epoch))?
-                    .map(token::Amount::from_change),
+                    .get_delta_val(ctx(), Epoch(epoch))?,
             );
         }
 
@@ -332,8 +328,8 @@ mod tests {
             let (exp_src_bond, exp_dest_bond) =
                 if epoch == pos_params.pipeline_len {
                     (
-                        Some((initial_stake - redelegation.amount).change()),
-                        Some(redelegation.amount.change()),
+                        Some(initial_stake - redelegation.amount),
+                        Some(redelegation.amount),
                     )
                 } else {
                     (None, None)
