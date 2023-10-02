@@ -155,6 +155,7 @@ impl AbstractPosState {
         let end = self.pipeline().prev();
         let withdrawable_epoch =
             self.epoch + self.params.withdrawable_epoch_offset();
+        let pipeline_len = self.params.pipeline_len;
 
         let records = self.records_mut(validator, source);
         // The amount requested is before any slashing that may be applicable
@@ -163,10 +164,16 @@ impl AbstractPosState {
         // Try to unbond redelegations first. We have to go in reverse order
         // of the start epoch to match the order of unbonding in the
         // implementation.
-        'bonds_iter: for (_start, bond) in records.bonds.iter_mut().rev() {
+        'bonds_iter: for (&start, bond) in records.bonds.iter_mut().rev() {
             for (dest_validator, redeleg) in bond.incoming_redelegs.iter_mut() {
+                let redeleg_epoch = start - pipeline_len;
+                // Slashes that were processed before redelegation are applied
+                // eagerly, so when we request some token amount, it will be
+                // unbonded from the amount after slashing, not before slashing
+                // as is the case with lazy slashes. In here, we only add back
+                // the lazy slashes that were processed after redelegation.
                 let amount_before_slashing =
-                    redeleg.tokens.amount_before_slashing();
+                    redeleg.amount_before_slashing_after_redeleg(redeleg_epoch);
 
                 let unbonded = if to_unbond >= amount_before_slashing {
                     // Unbond the whole bond
@@ -315,8 +322,10 @@ impl AbstractPosState {
                     + withdrawable_epoch_offset
                     <= current_epoch
                 {
-                    let amount_before_slashing =
-                        redeleg.tokens.amount_before_slashing();
+                    let redeleg_epoch = start - pipeline_len;
+                    // The same slashes reasoning applies as in `fn unbond`.
+                    let amount_before_slashing = redeleg
+                        .amount_before_slashing_after_redeleg(redeleg_epoch);
 
                     let unbonded = if to_unbond >= amount_before_slashing {
                         // Unbond the whole bond
@@ -872,6 +881,7 @@ impl AbstractPosState {
         for (addr, records) in self.validator_records.iter_mut() {
             if addr == validator {
                 for (source, records) in records.per_source.iter_mut() {
+                    // Apply slashes on non-redelegated bonds
                     records.slash(total_rate, infraction_epoch, current_epoch);
 
                     // Slash tokens in the outgoing redelegation records for
