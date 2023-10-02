@@ -4229,14 +4229,6 @@ impl ReferenceStateMachine for AbstractPosState {
                 infraction_epoch,
                 height: _,
             } => {
-                // TEMP: Only slash validator if it wasn't slashed before as
-                // there is a disagreement between model and the impl on
-                // multiple slashes. We can remove this condition once we
-                // resolve <https://github.com/informalsystems/partnership-heliax/issues/74>
-                let temp_is_unique_validator_slash =
-                    state.enqueued_slashes.iter().any(|(_epoch, slashes)| {
-                        !slashes.contains_key(address)
-                    }) && !state.validator_slashes.contains_key(address);
                 let is_validator =
                     state.is_validator(address, *infraction_epoch);
 
@@ -4316,8 +4308,7 @@ impl ReferenceStateMachine for AbstractPosState {
                 let can_misbehave = state_at_infraction.cloned()
                     == Some(ValidatorState::Consensus);
 
-                temp_is_unique_validator_slash
-                    && is_validator
+                is_validator
                     && valid_epoch
                     && enough_honest_validators()
                     && can_misbehave
