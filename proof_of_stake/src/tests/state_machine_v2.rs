@@ -2222,12 +2222,12 @@ impl StateMachineTest for ConcretePosState {
                         .unwrap()
                         .collect();
                 'bonds_loop: for res in bonds.into_iter().rev() {
-                    let (start, bond_delta) = res.unwrap();
+                    let (bond_start, bond_delta) = res.unwrap();
 
                     // Find incoming redelegations at this bond start epoch as a
                     // redelegation end epoch (the epoch in which it stopped to
                     // contributing to src)
-                    let redeleg_end = start;
+                    let redeleg_end = bond_start;
                     let redeleg_start =
                         params.redelegation_start_epoch_from_end(redeleg_end);
                     let redelegations: Vec<_> = redelegations_handle
@@ -2251,16 +2251,21 @@ impl StateMachineTest for ConcretePosState {
                         // Find redelegation source validator's slashes
                         let slashes = find_slashes_in_range(
                             &state.s,
-                            redeleg_start,
+                            bond_start,
                             Some(redeleg_end),
                             &src_validator,
                         )
                         .unwrap();
-                        for (_slash_epoch, rate) in slashes {
-                            let slash = delta.mul_ceil(rate);
-                            this_amount_after_slash = this_amount_after_slash
-                                .checked_sub(slash)
-                                .unwrap_or_default();
+                        for (slash_epoch, rate) in slashes {
+                            // Only apply slashes that weren't processed before
+                            // redelegation as those are applied eagerly
+                            if slash_epoch <= redeleg_start {
+                                let slash = delta.mul_ceil(rate);
+                                this_amount_after_slash =
+                                    this_amount_after_slash
+                                        .checked_sub(slash)
+                                        .unwrap_or_default();
+                            }
                         }
                         // Find redelegation destination validator's slashes
                         let slashes = find_slashes_in_range(
@@ -2304,7 +2309,7 @@ impl StateMachineTest for ConcretePosState {
                         // Find validator's slashes
                         let slashes = find_slashes_in_range(
                             &state.s,
-                            start,
+                            bond_start,
                             None,
                             &id.validator,
                         )
