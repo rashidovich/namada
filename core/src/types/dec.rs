@@ -4,6 +4,7 @@
 //! precision.
 
 use std::fmt::{Debug, Display, Formatter};
+use std::iter::Sum;
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub};
 use std::str::FromStr;
 
@@ -327,6 +328,12 @@ impl Add<u64> for Dec {
 impl AddAssign<Dec> for Dec {
     fn add_assign(&mut self, rhs: Dec) {
         *self = *self + rhs;
+    }
+}
+
+impl Sum for Dec {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Dec::default(), |acc, next| acc + next)
     }
 }
 
