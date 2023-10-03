@@ -2211,82 +2211,93 @@ impl StateMachineTest for ConcretePosState {
                 let mut amount_after_slash = token::Amount::zero();
                 let mut to_redelegate = amount;
 
-                // Iterate incoming redelegations first
-                let redelegations: Vec<_> =
+                let redelegations_handle =
                     delegator_redelegated_bonds_handle(&id.source)
-                        .at(&id.validator)
+                        .at(&id.validator);
+
+                let bonds: Vec<Result<_, _>> =
+                    bond_handle(&id.source, &id.validator)
+                        .get_data_handler()
                         .iter(&state.s)
                         .unwrap()
                         .collect();
-                for res in redelegations.into_iter().rev() {
-                    let (
-                        NestedSubKey::Data {
-                            key: redelegation_end,
-                            nested_sub_key:
-                                NestedSubKey::Data {
-                                    key: src_validator,
-                                    nested_sub_key: SubKey::Data(start),
-                                },
-                        },
-                        delta,
-                    ) = res.unwrap();
+                'bonds_loop: for res in bonds.into_iter().rev() {
+                    let (start, bond_delta) = res.unwrap();
 
-                    // Apply slashes on this delta, if any
-                    let mut this_amount_after_slash = delta;
+                    // Find incoming redelegations at this bond start epoch as a
+                    // redelegation end epoch (the epoch in which it stopped to
+                    // contributing to src)
+                    let redeleg_end = start;
+                    let redeleg_start =
+                        params.redelegation_start_epoch_from_end(redeleg_end);
+                    let redelegations: Vec<_> = redelegations_handle
+                        .at(&redeleg_end)
+                        .iter(&state.s)
+                        .unwrap()
+                        .collect();
+                    // Iterate incoming redelegations first
+                    for res in redelegations.into_iter().rev() {
+                        let (
+                            NestedSubKey::Data {
+                                key: src_validator,
+                                nested_sub_key: SubKey::Data(_bond_start),
+                            },
+                            delta,
+                        ) = res.unwrap();
 
-                    // Find redelegation source validator's slashes
-                    let slashes = find_slashes_in_range(
-                        &state.s,
-                        start,
-                        Some(redelegation_end),
-                        &src_validator,
-                    )
-                    .unwrap();
-                    for (_slash_epoch, rate) in slashes {
-                        let slash = this_amount_after_slash.mul_ceil(rate);
-                        this_amount_after_slash -= slash;
+                        // Apply slashes on this delta, if any
+                        let mut this_amount_after_slash = delta;
+
+                        // Find redelegation source validator's slashes
+                        let slashes = find_slashes_in_range(
+                            &state.s,
+                            redeleg_start,
+                            Some(redeleg_end),
+                            &src_validator,
+                        )
+                        .unwrap();
+                        for (_slash_epoch, rate) in slashes {
+                            let slash = delta.mul_ceil(rate);
+                            this_amount_after_slash = this_amount_after_slash
+                                .checked_sub(slash)
+                                .unwrap_or_default();
+                        }
+                        // Find redelegation destination validator's slashes
+                        let slashes = find_slashes_in_range(
+                            &state.s,
+                            redeleg_end,
+                            None,
+                            &id.validator,
+                        )
+                        .unwrap();
+                        for (_slash_epoch, rate) in slashes {
+                            let slash = delta.mul_ceil(rate);
+                            this_amount_after_slash = this_amount_after_slash
+                                .checked_sub(slash)
+                                .unwrap_or_default();
+                        }
+
+                        if to_redelegate >= delta {
+                            amount_after_slash += this_amount_after_slash;
+                            to_redelegate -= delta;
+                        } else {
+                            // We have to divide this bond in case there are
+                            // slashes
+                            let slash_ratio =
+                                Dec::from(this_amount_after_slash)
+                                    / Dec::from(delta);
+                            amount_after_slash += slash_ratio * to_redelegate;
+                            to_redelegate = token::Amount::zero();
+                        }
+
+                        if to_redelegate.is_zero() {
+                            break 'bonds_loop;
+                        }
                     }
-                    // Find redelegation destination validator's slashes
-                    let slashes = find_slashes_in_range(
-                        &state.s,
-                        redelegation_end,
-                        None,
-                        &id.validator,
-                    )
-                    .unwrap();
-                    for (_slash_epoch, rate) in slashes {
-                        let slash = this_amount_after_slash.mul_ceil(rate);
-                        this_amount_after_slash -= slash;
-                    }
 
-                    if to_redelegate >= delta {
-                        amount_after_slash += this_amount_after_slash;
-                        to_redelegate -= delta;
-                    } else {
-                        // We have to divide this bond in case there are slashes
-                        let slash_ratio = Dec::from(this_amount_after_slash)
-                            / Dec::from(delta);
-                        amount_after_slash += slash_ratio * to_redelegate;
-                        to_redelegate = token::Amount::zero();
-                    }
-
-                    if to_redelegate.is_zero() {
-                        break;
-                    }
-                }
-
-                // Then if there's still something to redelegate, iterate
-                // regular bonds
-                if !to_redelegate.is_zero() {
-                    let bonds: Vec<Result<_, _>> =
-                        bond_handle(&id.source, &id.validator)
-                            .get_data_handler()
-                            .iter(&state.s)
-                            .unwrap()
-                            .collect();
-                    for res in bonds.into_iter().rev() {
-                        let (start, bond_delta) = res.unwrap();
-
+                    // Then if there's still something to redelegate, unbond the
+                    // regular bonds
+                    if !to_redelegate.is_zero() {
                         // Apply slashes on this bond delta, if any
                         let mut this_amount_after_slash = bond_delta;
 
@@ -2299,8 +2310,10 @@ impl StateMachineTest for ConcretePosState {
                         )
                         .unwrap();
                         for (_slash_epoch, rate) in slashes {
-                            let slash = this_amount_after_slash.mul_ceil(rate);
-                            this_amount_after_slash -= slash;
+                            let slash = bond_delta.mul_ceil(rate);
+                            this_amount_after_slash = this_amount_after_slash
+                                .checked_sub(slash)
+                                .unwrap_or_default();
                         }
 
                         if to_redelegate >= bond_delta {
