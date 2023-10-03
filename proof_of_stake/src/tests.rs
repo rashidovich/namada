@@ -7,6 +7,7 @@ mod utils;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{Deref, Range};
+use std::str::FromStr;
 
 use assert_matches::assert_matches;
 use namada_core::ledger::storage::testing::TestWlStorage;
@@ -207,6 +208,22 @@ proptest! {
 
     ) {
         test_chain_redelegations_aux(genesis_validators)
+    }
+}
+
+proptest! {
+    // Generate arb valid input for `test_overslashing_aux`
+    #![proptest_config(Config {
+        cases: 1,
+        .. Config::default()
+    })]
+    #[test]
+    fn test_overslashing(
+
+    genesis_validators in arb_genesis_validators(4..5, None),
+
+    ) {
+        test_overslashing_aux(genesis_validators)
     }
 }
 
@@ -3201,623 +3218,6 @@ fn test_fold_and_slash_redelegated_bonds() {
     );
 }
 
-/// `computeTotalUnbondedTest`
-// #[test]
-// fn test_compute_total_unbonded() {
-//     let mut storage = TestWlStorage::default();
-//     let params = PosParams {
-//         unbonding_len: 4,
-//         ..Default::default()
-//     };
-//     let alice = established_address_1();
-//     let bob = established_address_2();
-
-//     let total_unbonded = total_unbonded_handle(&alice).at(&Epoch::default());
-//     total_unbonded
-//         .insert(&mut storage, Epoch(2), token::Amount::from(5))
-//         .unwrap();
-//     total_unbonded
-//         .insert(&mut storage, Epoch(8), token::Amount::from(20))
-//         .unwrap();
-
-//     let total_redelegated_unbonded =
-//         validator_total_redelegated_unbonded_handle(&alice)
-//             .at(&Epoch::default());
-//     total_redelegated_unbonded
-//         .at(&Epoch(8))
-//         .at(&bob)
-//         .insert(&mut storage, Epoch(4), token::Change::from(10))
-//         .unwrap();
-
-//     // Test case 1
-//     let res = compute_total_unbonded(
-//         &storage,
-//         &params,
-//         &alice,
-//         Epoch(10),
-//         &total_unbonded,
-//         &total_redelegated_unbonded,
-//     )
-//     .unwrap();
-//     assert_eq!(res, token::Amount::from(25));
-
-//     // Test case 2
-//     let res = compute_total_unbonded(
-//         &storage,
-//         &params,
-//         &alice,
-//         Epoch(7),
-//         &total_unbonded,
-//         &total_redelegated_unbonded,
-//     )
-//     .unwrap();
-//     assert_eq!(res, token::Amount::from(5));
-
-//     // Insert slash for alice
-//     validator_slashes_handle(&alice)
-//         .push(
-//             &mut storage,
-//             Slash {
-//                 epoch: Epoch(2),
-//                 block_height: Default::default(),
-//                 r#type: SlashType::DuplicateVote,
-//                 rate: Dec::one(),
-//             },
-//         )
-//         .unwrap();
-
-//     // Test case 3
-//     let res = compute_total_unbonded(
-//         &storage,
-//         &params,
-//         &alice,
-//         Epoch(10),
-//         &total_unbonded,
-//         &total_redelegated_unbonded,
-//     )
-//     .unwrap();
-//     assert_eq!(res, token::Amount::from(20));
-
-//     // Insert slash for bob
-//     validator_slashes_handle(&bob)
-//         .push(
-//             &mut storage,
-//             Slash {
-//                 epoch: Epoch(4),
-//                 block_height: Default::default(),
-//                 r#type: SlashType::DuplicateVote,
-//                 rate: Dec::one(),
-//             },
-//         )
-//         .unwrap();
-
-//     // Test case 4
-//     let res = compute_total_unbonded(
-//         &storage,
-//         &params,
-//         &alice,
-//         Epoch(10),
-//         &total_unbonded,
-//         &total_redelegated_unbonded,
-//     )
-//     .unwrap();
-//     assert_eq!(res, token::Amount::from(10));
-// }
-
-/// `foldRedelegatedBondsMapTest`
-// #[test]
-// fn test_fold_redelegated_bonds() {
-//     let mut storage = TestWlStorage::default();
-
-//     let alice = established_address_1();
-//     let bob = established_address_2();
-
-//     let key = Key::parse("testing").unwrap();
-//     let redelegated_bonds = RedelegatedTokens::open(key);
-
-//     let res = fold_redelegated_bonds_map(&storage,
-// &redelegated_bonds).unwrap();     assert_eq!(res, token::Change::zero());
-
-//     redelegated_bonds
-//         .at(&alice)
-//         .insert(&mut storage, Epoch(5), token::Change::from(6))
-//         .unwrap();
-//     let res = fold_redelegated_bonds_map(&storage,
-// &redelegated_bonds).unwrap();     assert_eq!(res, token::Change::from(6));
-
-//     redelegated_bonds
-//         .at(&alice)
-//         .insert(&mut storage, Epoch(6), token::Change::from(8))
-//         .unwrap();
-//     let res = fold_redelegated_bonds_map(&storage,
-// &redelegated_bonds).unwrap();     assert_eq!(res, token::Change::from(14));
-
-//     redelegated_bonds
-//         .at(&bob)
-//         .insert(&mut storage, Epoch(3), token::Change::from(7))
-//         .unwrap();
-//     let res = fold_redelegated_bonds_map(&storage,
-// &redelegated_bonds).unwrap();     assert_eq!(res, token::Change::from(21));
-// }
-
-/// `computeRecentTotalUnbondedTest`
-// #[test]
-// fn test_compute_recent_total_unbonded() {
-//     let mut storage = TestWlStorage::default();
-
-//     let alice = established_address_1();
-//     let bob = established_address_2();
-
-//     let total_unbonded = total_unbonded_handle(&alice).at(&Epoch::default());
-//     let total_redelegated_unbonded =
-//         validator_total_redelegated_unbonded_handle(&bob).at(&
-// Epoch::default());
-
-//     // Test case 1
-//     let res = compute_recent_total_unbonded(
-//         &storage,
-//         Epoch(5),
-//         &total_unbonded,
-//         &total_redelegated_unbonded,
-//     )
-//     .unwrap();
-//     assert_eq!(res, token::Amount::zero());
-
-//     // Test case 2
-//     total_unbonded
-//         .insert(&mut storage, Epoch(6), token::Amount::from(10))
-//         .unwrap();
-//     total_unbonded
-//         .insert(&mut storage, Epoch(7), token::Amount::from(20))
-//         .unwrap();
-//     let res = compute_recent_total_unbonded(
-//         &storage,
-//         Epoch(5),
-//         &total_unbonded,
-//         &total_redelegated_unbonded,
-//     )
-//     .unwrap();
-//     assert_eq!(res, token::Amount::from(30));
-
-//     // Test case 3
-//     total_unbonded.remove(&mut storage, &Epoch(6)).unwrap();
-//     total_unbonded
-//         .insert(&mut storage, Epoch(4), token::Amount::from(10))
-//         .unwrap();
-//     let res = compute_recent_total_unbonded(
-//         &storage,
-//         Epoch(5),
-//         &total_unbonded,
-//         &total_redelegated_unbonded,
-//     )
-//     .unwrap();
-//     assert_eq!(res, token::Amount::from(20));
-
-//     // Test case 4
-//     let res = compute_recent_total_unbonded(
-//         &storage,
-//         Epoch(8),
-//         &total_unbonded,
-//         &total_redelegated_unbonded,
-//     )
-//     .unwrap();
-//     assert_eq!(res, token::Amount::zero());
-
-//     // Test case 5
-//     total_unbonded.remove(&mut storage, &Epoch(4)).unwrap();
-//     total_unbonded
-//         .insert(&mut storage, Epoch(6), token::Amount::from(10))
-//         .unwrap();
-//     total_redelegated_unbonded
-//         .at(&Epoch(6))
-//         .at(&alice)
-//         .insert(&mut storage, Epoch(5), token::Change::from(6))
-//         .unwrap();
-//     total_redelegated_unbonded
-//         .at(&Epoch(6))
-//         .at(&alice)
-//         .insert(&mut storage, Epoch(6), token::Change::from(4))
-//         .unwrap();
-//     let res = compute_recent_total_unbonded(
-//         &storage,
-//         Epoch(5),
-//         &total_unbonded,
-//         &total_redelegated_unbonded,
-//     )
-//     .unwrap();
-//     assert_eq!(res, token::Amount::from(20));
-// }
-
-/// `computeRemainderRedelegationTest`
-// #[test]
-// fn test_compute_remainder_redelegation() {
-//     let mut storage = TestWlStorage::default();
-//     let params = PosParams {
-//         unbonding_len: 4,
-//         ..Default::default()
-//     };
-
-//     let alice = established_address_1();
-//     let bob = established_address_2();
-
-//     let total_redelegated_unbonded =
-//         validator_total_redelegated_unbonded_handle(&alice);
-//     let slashes = validator_slashes_handle(&alice);
-
-//     let redelegation = Redelegation {
-//         redel_bond_start: Epoch(8),
-//         src_validator: alice.clone(),
-//         bond_start: Epoch(5),
-//         amount: token::Amount::from(10),
-//     };
-//     let mut balances = vec![(9, 0), (10, 0)]
-//         .into_iter()
-//         .map(|(epoch, amount)| (Epoch(epoch), token::Amount::from(amount)))
-//         .collect::<BTreeMap<_, _>>();
-//     let init_balances = balances.clone();
-
-//     // Test case 1
-//     compute_remainder_redelegation(
-//         &storage,
-//         &params,
-//         &redelegation,
-//         Epoch(8),
-//         &slashes,
-//         &total_redelegated_unbonded,
-//         &mut balances,
-//     )
-//     .unwrap();
-//     let exp_balances = vec![(9, 10), (10, 10)]
-//         .into_iter()
-//         .map(|(epoch, amount)| (Epoch(epoch), token::Amount::from(amount)))
-//         .collect::<BTreeMap<_, _>>();
-//     assert_eq!(balances, exp_balances);
-
-//     // Test case 2
-//     balances = init_balances.clone();
-//     slashes
-//         .push(
-//             &mut storage,
-//             Slash {
-//                 epoch: Epoch(4),
-//                 block_height: Default::default(),
-//                 r#type: SlashType::DuplicateVote,
-//                 rate: Dec::one(),
-//             },
-//         )
-//         .unwrap();
-//     compute_remainder_redelegation(
-//         &storage,
-//         &params,
-//         &redelegation,
-//         Epoch(8),
-//         &slashes,
-//         &total_redelegated_unbonded,
-//         &mut balances,
-//     )
-//     .unwrap();
-//     assert_eq!(balances, exp_balances);
-
-//     // Test case 3
-//     balances.insert(Epoch(9), token::Amount::from(5));
-//     balances.insert(Epoch(10), token::Amount::from(4));
-//     compute_remainder_redelegation(
-//         &storage,
-//         &params,
-//         &redelegation,
-//         Epoch(8),
-//         &slashes,
-//         &total_redelegated_unbonded,
-//         &mut balances,
-//     )
-//     .unwrap();
-//     let exp_balances = vec![(9, 15), (10, 14)]
-//         .into_iter()
-//         .map(|(epoch, amount)| (Epoch(epoch), token::Amount::from(amount)))
-//         .collect::<BTreeMap<_, _>>();
-//     assert_eq!(balances, exp_balances);
-
-//     // Test case 4
-//     slashes.pop(&mut storage).unwrap();
-//     slashes
-//         .push(
-//             &mut storage,
-//             Slash {
-//                 epoch: Epoch(5),
-//                 block_height: Default::default(),
-//                 r#type: SlashType::DuplicateVote,
-//                 rate: Dec::one(),
-//             },
-//         )
-//         .unwrap();
-//     balances = init_balances.clone();
-//     compute_remainder_redelegation(
-//         &storage,
-//         &params,
-//         &redelegation,
-//         Epoch(8),
-//         &slashes,
-//         &total_redelegated_unbonded,
-//         &mut balances,
-//     )
-//     .unwrap();
-//     let exp_balances = vec![(9, 0), (10, 0)]
-//         .into_iter()
-//         .map(|(epoch, amount)| (Epoch(epoch), token::Amount::from(amount)))
-//         .collect::<BTreeMap<_, _>>();
-//     assert_eq!(balances, exp_balances);
-
-//     // Test case 5
-//     slashes
-//         .push(
-//             &mut storage,
-//             Slash {
-//                 epoch: Epoch(6),
-//                 block_height: Default::default(),
-//                 r#type: SlashType::DuplicateVote,
-//                 rate: Dec::one(),
-//             },
-//         )
-//         .unwrap();
-//     balances = init_balances.clone();
-//     compute_remainder_redelegation(
-//         &storage,
-//         &params,
-//         &redelegation,
-//         Epoch(8),
-//         &slashes,
-//         &total_redelegated_unbonded,
-//         &mut balances,
-//     )
-//     .unwrap();
-//     assert_eq!(balances, exp_balances);
-
-//     // Test case 6
-//     assert_eq!(slashes.len(&storage).unwrap(), 2);
-//     slashes.pop(&mut storage).unwrap();
-//     slashes.pop(&mut storage).unwrap();
-
-//     balances = init_balances.clone();
-//     total_redelegated_unbonded
-//         .at(&Epoch(8))
-//         .at(&Epoch(8))
-//         .at(&bob)
-//         .insert(&mut storage, Epoch(5), token::Change::from(8))
-//         .unwrap();
-//     compute_remainder_redelegation(
-//         &storage,
-//         &params,
-//         &redelegation,
-//         Epoch(8),
-//         &slashes,
-//         &total_redelegated_unbonded,
-//         &mut balances,
-//     )
-//     .unwrap();
-//     let exp_balances = vec![(9, 10), (10, 10)]
-//         .into_iter()
-//         .map(|(epoch, amount)| (Epoch(epoch), token::Amount::from(amount)))
-//         .collect::<BTreeMap<_, _>>();
-//     assert_eq!(balances, exp_balances);
-
-//     // Test case 7
-//     balances = init_balances.clone();
-//     total_redelegated_unbonded
-//         .remove_all(&mut storage, &Epoch(8))
-//         .unwrap();
-//     assert!(total_redelegated_unbonded.is_empty(&storage).unwrap());
-//     total_redelegated_unbonded
-//         .at(&Epoch(8))
-//         .at(&Epoch(8))
-//         .at(&alice)
-//         .insert(&mut storage, Epoch(5), token::Change::from(8))
-//         .unwrap();
-//     compute_remainder_redelegation(
-//         &storage,
-//         &params,
-//         &redelegation,
-//         Epoch(8),
-//         &slashes,
-//         &total_redelegated_unbonded,
-//         &mut balances,
-//     )
-//     .unwrap();
-//     let exp_balances = vec![(9, 2), (10, 2)]
-//         .into_iter()
-//         .map(|(epoch, amount)| (Epoch(epoch), token::Amount::from(amount)))
-//         .collect::<BTreeMap<_, _>>();
-//     assert_eq!(balances, exp_balances);
-
-//     // Test case 8
-//     balances = init_balances;
-//     total_redelegated_unbonded
-//         .remove_all(&mut storage, &Epoch(8))
-//         .unwrap();
-//     assert!(total_redelegated_unbonded.is_empty(&storage).unwrap());
-//     total_redelegated_unbonded
-//         .at(&Epoch(10))
-//         .at(&Epoch(8))
-//         .at(&alice)
-//         .insert(&mut storage, Epoch(5), token::Change::from(8))
-//         .unwrap();
-//     compute_remainder_redelegation(
-//         &storage,
-//         &params,
-//         &redelegation,
-//         Epoch(8),
-//         &slashes,
-//         &total_redelegated_unbonded,
-//         &mut balances,
-//     )
-//     .unwrap();
-//     let exp_balances = vec![(9, 10), (10, 2)]
-//         .into_iter()
-//         .map(|(epoch, amount)| (Epoch(epoch), token::Amount::from(amount)))
-//         .collect::<BTreeMap<_, _>>();
-//     assert_eq!(balances, exp_balances);
-// }
-
-/// `computeBalanceRedelegatedBondsTest`
-// #[test]
-// fn test_compute_redelegated_bonds_balance() {
-//     let mut storage = TestWlStorage::default();
-//     let params = PosParams {
-//         unbonding_len: 4,
-//         ..Default::default()
-//     };
-
-//     let alice = established_address_1();
-//     let bob = established_address_2();
-
-//     let total_redelegated_unbonded =
-//         validator_total_redelegated_unbonded_handle(&alice);
-
-//     let total_redelegated_bonded =
-//         validator_total_redelegated_bonded_handle(&alice).at(&
-// Epoch::default());     let test_data = vec![
-//         (alice.clone(), 5, 10),
-//         (alice.clone(), 6, 5),
-//         (bob.clone(), 5, 9),
-//         (bob.clone(), 6, 5),
-//     ];
-//     for (address, epoch, amount) in test_data {
-//         total_redelegated_bonded
-//             .at(&address)
-//             .insert(&mut storage, Epoch(epoch), token::Change::from(amount))
-//             .unwrap();
-//     }
-//     let mut balances = vec![(9, 0), (10, 0)]
-//         .into_iter()
-//         .map(|(epoch, amount)| (Epoch(epoch), token::Amount::from(amount)))
-//         .collect::<BTreeMap<_, _>>();
-//     let init_balances = balances.clone();
-
-//     // Test case 1
-//     compute_redelegated_bonds_balance(
-//         &storage,
-//         &params,
-//         Epoch(7),
-//         Epoch(8),
-//         &total_redelegated_bonded,
-//         &total_redelegated_unbonded,
-//         &mut balances,
-//     )
-//     .unwrap();
-//     let exp_balances = vec![(9, 29), (10, 29)]
-//         .into_iter()
-//         .map(|(epoch, amount)| (Epoch(epoch), token::Amount::from(amount)))
-//         .collect::<BTreeMap<_, _>>();
-//     assert_eq!(balances, exp_balances);
-
-//     // Test case 2
-//     balances.insert(Epoch(9), token::Amount::from(2));
-//     balances.insert(Epoch(10), token::Amount::from(1));
-//     compute_redelegated_bonds_balance(
-//         &storage,
-//         &params,
-//         Epoch(7),
-//         Epoch(8),
-//         &total_redelegated_bonded,
-//         &total_redelegated_unbonded,
-//         &mut balances,
-//     )
-//     .unwrap();
-//     let exp_balances = vec![(9, 31), (10, 30)]
-//         .into_iter()
-//         .map(|(epoch, amount)| (Epoch(epoch), token::Amount::from(amount)))
-//         .collect::<BTreeMap<_, _>>();
-//     assert_eq!(balances, exp_balances);
-
-//     // Test case 3
-//     validator_slashes_handle(&alice)
-//         .push(
-//             &mut storage,
-//             Slash {
-//                 epoch: Epoch(4),
-//                 block_height: Default::default(),
-//                 r#type: SlashType::DuplicateVote,
-//                 rate: Dec::one(),
-//             },
-//         )
-//         .unwrap();
-//     balances = init_balances.clone();
-//     compute_redelegated_bonds_balance(
-//         &storage,
-//         &params,
-//         Epoch(7),
-//         Epoch(8),
-//         &total_redelegated_bonded,
-//         &total_redelegated_unbonded,
-//         &mut balances,
-//     )
-//     .unwrap();
-//     let exp_balances = vec![(9, 29), (10, 29)]
-//         .into_iter()
-//         .map(|(epoch, amount)| (Epoch(epoch), token::Amount::from(amount)))
-//         .collect::<BTreeMap<_, _>>();
-//     assert_eq!(balances, exp_balances);
-
-//     // Test case 4
-//     validator_slashes_handle(&alice).pop(&mut storage).unwrap();
-//     validator_slashes_handle(&alice)
-//         .push(
-//             &mut storage,
-//             Slash {
-//                 epoch: Epoch(5),
-//                 block_height: Default::default(),
-//                 r#type: SlashType::DuplicateVote,
-//                 rate: Dec::one(),
-//             },
-//         )
-//         .unwrap();
-//     balances = init_balances.clone();
-//     compute_redelegated_bonds_balance(
-//         &storage,
-//         &params,
-//         Epoch(7),
-//         Epoch(8),
-//         &total_redelegated_bonded,
-//         &total_redelegated_unbonded,
-//         &mut balances,
-//     )
-//     .unwrap();
-//     let exp_balances = vec![(9, 19), (10, 19)]
-//         .into_iter()
-//         .map(|(epoch, amount)| (Epoch(epoch), token::Amount::from(amount)))
-//         .collect::<BTreeMap<_, _>>();
-//     assert_eq!(balances, exp_balances);
-
-//     // Test case 5
-//     balances = init_balances;
-//     total_redelegated_unbonded
-//         .at(&Epoch(10))
-//         .at(&Epoch(7))
-//         .at(&bob)
-//         .insert(&mut storage, Epoch(5), token::Change::from(9))
-//         .unwrap();
-//     total_redelegated_unbonded
-//         .at(&Epoch(10))
-//         .at(&Epoch(7))
-//         .at(&bob)
-//         .insert(&mut storage, Epoch(6), token::Change::from(3))
-//         .unwrap();
-//     compute_redelegated_bonds_balance(
-//         &storage,
-//         &params,
-//         Epoch(7),
-//         Epoch(8),
-//         &total_redelegated_bonded,
-//         &total_redelegated_unbonded,
-//         &mut balances,
-//     )
-//     .unwrap();
-//     let exp_balances = vec![(9, 19), (10, 7)]
-//         .into_iter()
-//         .map(|(epoch, amount)| (Epoch(epoch), token::Amount::from(amount)))
-//         .collect::<BTreeMap<_, _>>();
-//     assert_eq!(balances, exp_balances);
-// }
-
 /// `slashRedelegationTest`
 #[test]
 fn test_slash_redelegation() {
@@ -6150,4 +5550,180 @@ fn test_from_sm_case_1() {
     };
 
     pretty_assertions::assert_eq!(mr, exp_mr);
+}
+
+/// Test precisely that we are not overslashing, as originally discovered by Tomas in this issue: https://github.com/informalsystems/partnership-heliax/issues/74
+fn test_overslashing_aux(mut validators: Vec<GenesisValidator>) {
+    assert_eq!(validators.len(), 4);
+
+    let params = PosParams {
+        unbonding_len: 4,
+        ..Default::default()
+    };
+
+    let offending_stake = token::Amount::native_whole(110);
+    let other_stake = token::Amount::native_whole(100);
+
+    // Set stakes so we know we will get a slashing rate between 0.5 -1.0
+    validators[0].tokens = offending_stake;
+    validators[1].tokens = other_stake;
+    validators[2].tokens = other_stake;
+    validators[3].tokens = other_stake;
+
+    // Get the offending validator
+    let validator = validators[0].address.clone();
+
+    println!("\nTest inputs: {params:?}, genesis validators: {validators:#?}");
+    let mut storage = TestWlStorage::default();
+
+    // Genesis
+    let mut current_epoch = storage.storage.block.epoch;
+    init_genesis(
+        &mut storage,
+        &params,
+        validators.clone().into_iter(),
+        current_epoch,
+    )
+    .unwrap();
+    storage.commit_block().unwrap();
+
+    // Get a delegator with some tokens
+    let staking_token = storage.storage.native_token.clone();
+    let delegator = address::testing::gen_implicit_address();
+    let amount_del = token::Amount::native_whole(5);
+    credit_tokens(&mut storage, &staking_token, &delegator, amount_del)
+        .unwrap();
+
+    // Delegate tokens in epoch 0 to validator
+    bond_tokens(
+        &mut storage,
+        Some(&delegator),
+        &validator,
+        amount_del,
+        current_epoch,
+    )
+    .unwrap();
+
+    let self_bond_epoch = current_epoch;
+    let delegation_epoch = current_epoch + params.pipeline_len;
+
+    // Advance to pipeline epoch
+    for _ in 0..params.pipeline_len {
+        current_epoch = advance_epoch(&mut storage, &params);
+    }
+    assert_eq!(delegation_epoch, current_epoch);
+
+    // Find a misbehavior committed in epoch 0
+    slash(
+        &mut storage,
+        &params,
+        current_epoch,
+        self_bond_epoch,
+        0_u64,
+        SlashType::DuplicateVote,
+        &validator,
+        current_epoch.next(),
+    )
+    .unwrap();
+
+    // Find a misbehavior committed in current epoch
+    slash(
+        &mut storage,
+        &params,
+        current_epoch,
+        delegation_epoch,
+        0_u64,
+        SlashType::DuplicateVote,
+        &validator,
+        current_epoch.next(),
+    )
+    .unwrap();
+
+    let processing_epoch_1 =
+        self_bond_epoch + params.slash_processing_epoch_offset();
+    let processing_epoch_2 =
+        delegation_epoch + params.slash_processing_epoch_offset();
+
+    // Advance to processing epoch 1
+    loop {
+        current_epoch = advance_epoch(&mut storage, &params);
+        super::process_slashes(&mut storage, current_epoch).unwrap();
+        if current_epoch == processing_epoch_1 {
+            break;
+        }
+    }
+
+    let total_stake_1 = offending_stake + 3 * other_stake;
+    let stake_frac = Dec::from(offending_stake) / Dec::from(total_stake_1);
+    let slash_rate_1 = Dec::from_str("9.0").unwrap() * stake_frac * stake_frac;
+    dbg!(&slash_rate_1);
+
+    let exp_slashed_1 = offending_stake.mul_ceil(slash_rate_1);
+
+    // Check that the proper amount was slashed
+    let epoch = current_epoch.next();
+    let validator_stake =
+        read_validator_stake(&storage, &params, &validator, epoch).unwrap();
+    let exp_validator_stake = offending_stake - exp_slashed_1 + amount_del;
+    assert_eq!(validator_stake, exp_validator_stake);
+
+    let total_stake = read_total_stake(&storage, &params, epoch).unwrap();
+    let exp_total_stake =
+        offending_stake - exp_slashed_1 + amount_del + 3 * other_stake;
+    assert_eq!(total_stake, exp_total_stake);
+
+    let self_bond_id = BondId {
+        source: validator.clone(),
+        validator: validator.clone(),
+    };
+    let bond_amount =
+        crate::bond_amount(&storage, &self_bond_id, epoch).unwrap();
+    let exp_bond_amount = offending_stake - exp_slashed_1;
+    assert_eq!(bond_amount, exp_bond_amount);
+
+    // Advance to processing epoch 2
+    loop {
+        current_epoch = advance_epoch(&mut storage, &params);
+        super::process_slashes(&mut storage, current_epoch).unwrap();
+        if current_epoch == processing_epoch_2 {
+            break;
+        }
+    }
+
+    let total_stake_2 = offending_stake + amount_del + 3 * other_stake;
+    let stake_frac =
+        Dec::from(offending_stake + amount_del) / Dec::from(total_stake_2);
+    let slash_rate_2 = Dec::from_str("9.0").unwrap() * stake_frac * stake_frac;
+    dbg!(&slash_rate_2);
+
+    let exp_slashed_from_delegation = amount_del.mul_ceil(slash_rate_2);
+
+    // Check that the proper amount was slashed. We expect that all of the
+    // validator self-bond has been slashed and some of the delegation has been
+    // slashed due to the second infraction.
+    let epoch = current_epoch.next();
+
+    let validator_stake =
+        read_validator_stake(&storage, &params, &validator, epoch).unwrap();
+    let exp_validator_stake = amount_del - exp_slashed_from_delegation;
+    assert_eq!(validator_stake, exp_validator_stake);
+
+    let total_stake = read_total_stake(&storage, &params, epoch).unwrap();
+    let exp_total_stake =
+        amount_del - exp_slashed_from_delegation + 3 * other_stake;
+    assert_eq!(total_stake, exp_total_stake);
+
+    let delegation_id = BondId {
+        source: delegator.clone(),
+        validator: validator.clone(),
+    };
+    let delegation_amount =
+        crate::bond_amount(&storage, &delegation_id, epoch).unwrap();
+    let exp_del_amount = amount_del - exp_slashed_from_delegation;
+    assert_eq!(delegation_amount, exp_del_amount);
+
+    let self_bond_amount =
+        crate::bond_amount(&storage, &self_bond_id, epoch).unwrap();
+    let exp_bond_amount = token::Amount::zero();
+    assert_eq!(self_bond_amount, exp_bond_amount);
 }
