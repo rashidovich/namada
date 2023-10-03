@@ -1,7 +1,7 @@
 //! Test PoS transitions with a state machine
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
-use std::ops::Deref;
+use std::ops::{AddAssign, Deref};
 use std::{cmp, mem};
 
 use assert_matches::assert_matches;
@@ -183,10 +183,9 @@ impl AbstractPosState {
                     mem::take(redeleg)
                 } else {
                     // We have to divide this bond in case there are slashes
-                    let slash_ratio = Dec::from(redeleg.tokens.amount)
-                        / Dec::from(amount_before_slashing);
-                    let to_unbond_after_slash = slash_ratio * to_unbond;
-                    let unbond_slash = to_unbond - to_unbond_after_slash;
+                    let unbond_slash =
+                        to_unbond.mul_ceil(redeleg.tokens.slash_rates_sum());
+                    let to_unbond_after_slash = to_unbond - unbond_slash;
 
                     to_unbond = token::Amount::zero();
                     amount_after_slashing += to_unbond_after_slash;
@@ -236,10 +235,9 @@ impl AbstractPosState {
                 mem::take(&mut bond.tokens)
             } else {
                 // We have to divide this bond in case there are slashes
-                let slash_ratio = Dec::from(bond.tokens.amount)
-                    / Dec::from(amount_before_slashing);
-                let to_unbond_after_slash = slash_ratio * to_unbond;
-                let unbond_slash = to_unbond - to_unbond_after_slash;
+                let unbond_slash =
+                    to_unbond.mul_ceil(bond.tokens.slash_rates_sum());
+                let to_unbond_after_slash = to_unbond - unbond_slash;
 
                 to_unbond = token::Amount::zero();
                 amount_after_slashing += to_unbond_after_slash;
@@ -335,10 +333,9 @@ impl AbstractPosState {
                         mem::take(redeleg)
                     } else {
                         // We have to divide this bond in case there are slashes
-                        let slash_ratio = Dec::from(redeleg.tokens.amount)
-                            / Dec::from(amount_before_slashing);
-                        let to_unbond_after_slash = slash_ratio * to_unbond;
-                        let unbond_slash = to_unbond - to_unbond_after_slash;
+                        let unbond_slash = to_unbond
+                            .mul_ceil(redeleg.tokens.slash_rates_sum());
+                        let to_unbond_after_slash = to_unbond - unbond_slash;
 
                         to_unbond = token::Amount::zero();
                         amount_after_slashing += to_unbond_after_slash;
@@ -388,10 +385,9 @@ impl AbstractPosState {
                     mem::take(&mut bond.tokens)
                 } else {
                     // We have to divide this bond in case there are slashes
-                    let slash_ratio = Dec::from(bond.tokens.amount)
-                        / Dec::from(amount_before_slashing);
-                    let to_unbond_after_slash = slash_ratio * to_unbond;
-                    let unbond_slash = to_unbond - to_unbond_after_slash;
+                    let unbond_slash =
+                        to_unbond.mul_ceil(bond.tokens.slash_rates_sum());
+                    let to_unbond_after_slash = to_unbond - unbond_slash;
 
                     to_unbond = token::Amount::zero();
                     amount_after_slashing += to_unbond_after_slash;
@@ -876,7 +872,7 @@ impl AbstractPosState {
 
         let mut redelegations_to_slash = BTreeMap::<
             Address,
-            BTreeMap<Address, BTreeMap<Epoch, token::Amount>>,
+            BTreeMap<Address, BTreeMap<Epoch, TokensSlash>>,
         >::new();
         for (addr, records) in self.validator_records.iter_mut() {
             if addr == validator {
@@ -910,7 +906,10 @@ impl AbstractPosState {
                                             // start epoch of redelegation
                                             end.next(),
                                         )
-                                        .or_default() += slashed;
+                                        .or_default() += TokensSlash {
+                                        amount: slashed,
+                                        rate: total_rate,
+                                    };
                                 }
                             }
                         }
@@ -921,7 +920,7 @@ impl AbstractPosState {
         // Apply redelegation slashes on destination validator
         for (dest_validator, redelegations) in redelegations_to_slash {
             for (source, tokens) in redelegations {
-                for (redelegation_start, tokens) in tokens {
+                for (redelegation_start, slash) in tokens {
                     let records = self
                         .validator_records
                         .get_mut(&dest_validator)
@@ -932,7 +931,7 @@ impl AbstractPosState {
                     records.subtract_redelegation_slash(
                         validator,
                         redelegation_start,
-                        tokens,
+                        slash,
                         current_epoch,
                     );
                 }
@@ -1484,7 +1483,7 @@ impl Records {
         &mut self,
         src_validator: &Address,
         redelegation_start: Epoch,
-        mut to_sub: token::Amount,
+        mut to_sub: TokensSlash,
         processing_epoch: Epoch,
     ) {
         // Slash redelegation destination on the next epoch
@@ -1494,21 +1493,24 @@ impl Records {
             if let Some(redeleg) =
                 unbond.incoming_redelegs.get_mut(src_validator)
             {
-                if redeleg.tokens.amount >= to_sub {
-                    redeleg.tokens.amount -= to_sub;
+                if redeleg.tokens.amount >= to_sub.amount {
+                    redeleg.tokens.amount -= to_sub.amount;
                     *redeleg.tokens.slashes.entry(slash_epoch).or_default() +=
                         to_sub;
                     return;
                 } else {
-                    to_sub -= redeleg.tokens.amount;
+                    to_sub.amount -= redeleg.tokens.amount;
                     *redeleg.tokens.slashes.entry(slash_epoch).or_default() +=
-                        redeleg.tokens.amount;
+                        TokensSlash {
+                            amount: redeleg.tokens.amount,
+                            rate: to_sub.rate,
+                        };
                     redeleg.tokens.amount = token::Amount::zero();
                 }
             }
         }
         let redeleg = bond.incoming_redelegs.get_mut(src_validator).unwrap();
-        redeleg.tokens.amount -= to_sub;
+        redeleg.tokens.amount -= to_sub.amount;
         *redeleg.tokens.slashes.entry(slash_epoch).or_default() += to_sub;
     }
 
@@ -1605,9 +1607,9 @@ impl IncomingRedeleg {
         redeleg_epoch: Epoch,
     ) -> token::Amount {
         let mut amount = self.tokens.amount;
-        for (&processed_epoch, &slash) in &self.tokens.slashes {
+        for (&processed_epoch, slash) in &self.tokens.slashes {
             if processed_epoch > redeleg_epoch {
-                amount += slash;
+                amount += slash.amount;
             }
         }
         amount
@@ -1620,7 +1622,21 @@ struct TokensWithSlashes {
     amount: token::Amount,
     /// Total amount that's been slashed associated with the epoch in which the
     /// slash was processed.
-    slashes: BTreeMap<Epoch, token::Amount>,
+    slashes: BTreeMap<Epoch, TokensSlash>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct TokensSlash {
+    amount: token::Amount,
+    rate: Dec,
+}
+
+impl AddAssign for TokensSlash {
+    fn add_assign(&mut self, rhs: Self) {
+        self.amount += rhs.amount;
+        // Cap the rate at 1
+        self.rate = cmp::min(Dec::one(), self.rate + rhs.rate);
+    }
 }
 
 impl TokensWithSlashes {
@@ -1636,19 +1652,19 @@ impl TokensWithSlashes {
         // (applied after infraction epoch)
         let slashable_amount =
             self.amount + self.slashes_sum_after_epoch(infraction_epoch);
-        let slash_amount =
-            cmp::min(slashable_amount.mul_ceil(rate), self.amount);
-        if !slash_amount.is_zero() {
-            self.amount -= slash_amount;
-            *self.slashes.entry(processing_epoch).or_default() += slash_amount;
+        let amount = cmp::min(slashable_amount.mul_ceil(rate), self.amount);
+        if !amount.is_zero() {
+            self.amount -= amount;
+            let slash = self.slashes.entry(processing_epoch).or_default();
+            *slash += TokensSlash { amount, rate };
         }
-        slash_amount
+        amount
     }
 
     /// Add the given slashes at their epochs.
-    fn add_slashes(&mut self, slashes: &BTreeMap<Epoch, token::Amount>) {
-        for (&epoch, &slash) in slashes {
-            *self.slashes.entry(epoch).or_default() += slash;
+    fn add_slashes(&mut self, slashes: &BTreeMap<Epoch, TokensSlash>) {
+        for (&epoch, slash) in slashes {
+            *self.slashes.entry(epoch).or_default() += slash.clone();
         }
     }
 
@@ -1657,20 +1673,26 @@ impl TokensWithSlashes {
     fn subtract_slash(
         &mut self,
         mut to_slash: token::Amount,
-    ) -> BTreeMap<Epoch, token::Amount> {
+    ) -> BTreeMap<Epoch, TokensSlash> {
         let mut removed = BTreeMap::new();
-        self.slashes.retain(|&epoch, amount| {
+        self.slashes.retain(|&epoch, slash| {
             if to_slash.is_zero() {
                 return true;
             }
-            if *amount > to_slash {
-                *amount -= to_slash;
-                removed.insert(epoch, to_slash);
+            if slash.amount > to_slash {
+                slash.amount -= to_slash;
+                removed.insert(
+                    epoch,
+                    TokensSlash {
+                        amount: to_slash,
+                        rate: slash.rate,
+                    },
+                );
                 to_slash = token::Amount::zero();
                 true
             } else {
-                to_slash -= *amount;
-                removed.insert(epoch, *amount);
+                to_slash -= slash.amount;
+                removed.insert(epoch, slash.clone());
                 false
             }
         });
@@ -1682,17 +1704,31 @@ impl TokensWithSlashes {
         self.amount + self.slashes_sum()
     }
 
-    /// Get a sum of all slashes.
+    /// Get a sum of all slash amounts.
     fn slashes_sum(&self) -> token::Amount {
-        self.slashes.values().copied().sum()
+        self.slashes
+            .values()
+            .map(|TokensSlash { amount, rate: _ }| *amount)
+            .sum()
+    }
+
+    /// Get a sum of all slash rates, capped at 1.
+    fn slash_rates_sum(&self) -> Dec {
+        cmp::min(
+            Dec::one(),
+            self.slashes
+                .values()
+                .map(|TokensSlash { amount: _, rate }| *rate)
+                .sum(),
+        )
     }
 
     /// Get a sum of all slashes that were processed after the given epoch.
     fn slashes_sum_after_epoch(&self, epoch: Epoch) -> token::Amount {
         let mut sum = token::Amount::zero();
-        for (&processed_epoch, &slash) in &self.slashes {
+        for (&processed_epoch, slash) in &self.slashes {
             if processed_epoch > epoch {
-                sum += slash;
+                sum += slash.amount;
             }
         }
         sum
