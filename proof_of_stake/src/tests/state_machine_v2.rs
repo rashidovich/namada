@@ -314,7 +314,9 @@ impl AbstractPosState {
             // In every loop, try to redelegate redelegations first. We have to
             // go in reverse order of the start epoch to match the order of
             // redelegation in the implementation.
-            for (_src_validator, redeleg) in bond.incoming_redelegs.iter_mut() {
+            for (_src_validator, redeleg) in
+                bond.incoming_redelegs.iter_mut().rev()
+            {
                 // No chained redelegations
                 if Epoch(start.0.checked_sub(pipeline_len).unwrap_or_default())
                     + withdrawable_epoch_offset
