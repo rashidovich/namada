@@ -2240,7 +2240,8 @@ impl StateMachineTest for ConcretePosState {
                         let (
                             NestedSubKey::Data {
                                 key: src_validator,
-                                nested_sub_key: SubKey::Data(_bond_start),
+                                nested_sub_key:
+                                    SubKey::Data(redeleg_src_bond_start),
                             },
                             delta,
                         ) = res.unwrap();
@@ -2251,7 +2252,7 @@ impl StateMachineTest for ConcretePosState {
                         // Find redelegation source validator's slashes
                         let slashes = find_slashes_in_range(
                             &state.s,
-                            bond_start,
+                            redeleg_src_bond_start,
                             Some(redeleg_end),
                             &src_validator,
                         )
