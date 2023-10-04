@@ -2260,7 +2260,10 @@ impl StateMachineTest for ConcretePosState {
                         for (slash_epoch, rate) in slashes {
                             // Only apply slashes that weren't processed before
                             // redelegation as those are applied eagerly
-                            if slash_epoch <= redeleg_start {
+                            if slash_epoch
+                                + params.slash_processing_epoch_offset()
+                                > redeleg_start
+                            {
                                 let slash = delta.mul_ceil(rate);
                                 this_amount_after_slash =
                                     this_amount_after_slash
