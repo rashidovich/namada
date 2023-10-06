@@ -198,8 +198,7 @@ pub trait IbcCommonContext: IbcStorageContext {
                 .map_err(ContextError::from),
             None => Err(ContextError::ClientError(ClientError::Other {
                 description: format!(
-                    "The client timestamp is invalid: ID {}",
-                    client_id
+                    "The client timestamp is invalid: ID {client_id}",
                 ),
             })),
         }
@@ -289,23 +288,19 @@ pub trait IbcCommonContext: IbcStorageContext {
     }
 
     /// Get the ConnectionEnd
-    fn connection_end(
-        &self,
-        connection_id: &ConnectionId,
-    ) -> Result<ConnectionEnd> {
-        let key = storage::connection_key(connection_id);
+    fn connection_end(&self, conn_id: &ConnectionId) -> Result<ConnectionEnd> {
+        let key = storage::connection_key(conn_id);
         match self.read_bytes(&key)? {
             Some(value) => ConnectionEnd::decode_vec(&value).map_err(|_| {
                 ConnectionError::Other {
                     description: format!(
-                        "Decoding the connection end failed: ID {}",
-                        connection_id,
+                        "Decoding the connection end failed: ID {conn_id}",
                     ),
                 }
                 .into()
             }),
             None => Err(ConnectionError::ConnectionNotFound {
-                connection_id: connection_id.clone(),
+                connection_id: conn_id.clone(),
             }
             .into()),
         }
@@ -347,8 +342,7 @@ pub trait IbcCommonContext: IbcStorageContext {
             Some(value) => ChannelEnd::decode_vec(&value).map_err(|_| {
                 ChannelError::Other {
                     description: format!(
-                        "Decoding the channel end failed: Key {}",
-                        key,
+                        "Decoding the channel end failed: Key {key}",
                     ),
                 }
                 .into()
@@ -443,8 +437,7 @@ pub trait IbcCommonContext: IbcStorageContext {
                 let value: [u8; 8] =
                     value.try_into().map_err(|_| ChannelError::Other {
                         description: format!(
-                            "The counter value wasn't u64: Key {}",
-                            key
+                            "The sequence value wasn't u64: Key {key}",
                         ),
                     })?;
                 Ok(u64::from_be_bytes(value).into())
@@ -604,8 +597,7 @@ pub trait IbcCommonContext: IbcStorageContext {
                 let value: [u8; 8] =
                     value.try_into().map_err(|_| ClientError::Other {
                         description: format!(
-                            "The counter value wasn't u64: Key {}",
-                            key
+                            "The counter value wasn't u64: Key {key}",
                         ),
                     })?;
                 Ok(u64::from_be_bytes(value))
@@ -634,14 +626,13 @@ pub trait IbcCommonContext: IbcStorageContext {
     ) -> Result<()> {
         let key = storage::ibc_denom_key(addr, trace_hash.as_ref());
         let has_key = self.has_key(&key).map_err(|_| ChannelError::Other {
-            description: format!("Reading the IBC denom failed: Key {}", key,),
+            description: format!("Reading the IBC denom failed: Key {key}"),
         })?;
         if !has_key {
             self.write(&key, denom.as_ref()).map_err(|_| {
                 ChannelError::Other {
                     description: format!(
-                        "Writing the denom failed: Key {}",
-                        key
+                        "Writing the denom failed: Key {key}",
                     ),
                 }
             })?;
@@ -651,8 +642,8 @@ pub trait IbcCommonContext: IbcStorageContext {
 }
 
 /// Convert `storage_api::Error` into `ContextError`.
-/// It always returns `ClientError` though the storage error could happen in any
-/// storage access.
+/// It always returns `ClientError::Other` though the storage error could happen
+/// in any storage access.
 impl From<storage_api::Error> for ContextError {
     fn from(error: storage_api::Error) -> Self {
         ClientError::Other {
