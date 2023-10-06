@@ -4345,8 +4345,7 @@ where
     // Collect the enqueued slashes and update their rates
     let mut eager_validator_slashes: BTreeMap<Address, Vec<Slash>> =
         BTreeMap::new(); // TODO: will need to update this in storage later
-    let mut eager_validator_slash_rates: BTreeMap<Address, Dec> =
-        BTreeMap::new();
+    let mut eager_validator_slash_rates: HashMap<Address, Dec> = HashMap::new();
 
     // `slashPerValidator` and `slashesMap` while also updating in storage
     for enqueued_slash in enqueued_slashes.iter(storage)? {
@@ -4408,7 +4407,6 @@ where
 
     // Update the validator stakes
     for (validator, slash_amounts) in map_validator_slash {
-        tracing::debug!("Slashing validator {}", validator);
         let mut slash_acc = token::Amount::zero();
 
         // Update validator sets first because it needs to be able to read
@@ -4417,11 +4415,6 @@ where
             let state = validator_state_handle(&validator)
                 .get(storage, epoch, &params)?
                 .unwrap();
-            tracing::debug!(
-                "State in epoch {epoch}: {:?}, slash {}",
-                state,
-                slash_amount.to_string_native(),
-            );
             if state != ValidatorState::Jailed {
                 update_validator_set(
                     storage,
@@ -4436,11 +4429,6 @@ where
         for (epoch, slash_amount) in slash_amounts {
             let slash_delta = slash_amount - slash_acc;
             slash_acc += slash_delta;
-
-            tracing::debug!(
-                "In epoch {epoch} slash_delta {}",
-                slash_delta.to_string_native()
-            );
 
             update_validator_deltas(
                 storage,
