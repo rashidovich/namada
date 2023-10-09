@@ -6,6 +6,8 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(rustdoc::private_intra_doc_links)]
 
+extern crate alloc;
+
 #[cfg(feature = "tendermint-rpc")]
 pub use tendermint_rpc;
 #[cfg(feature = "tendermint-rpc-abcipp")]

@@ -11,3 +11,6 @@ pub mod tx;
 pub mod error;
 pub mod queries;
 pub mod wallet;
+
+// internal macros
+pub(crate) mod internal_macros;
