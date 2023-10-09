@@ -31,6 +31,7 @@ use crate::proto::Tx;
 use crate::sdk::args::InputAmount;
 use crate::sdk::error;
 use crate::sdk::error::{EncodingError, Error, QueryError, TxError};
+use crate::sdk::internal_macros::echo_error;
 use crate::tendermint::block::Height;
 use crate::tendermint::merkle::proof::Proof;
 use crate::tendermint_rpc::error::Error as TError;
@@ -1045,12 +1046,12 @@ where
                 try_count.set(try_count.get() + 1);
                 ControlFlow::Continue(())
             }
-            Err(e) => {
-                let msg =
-                    format!("Failed to query node status with error: {e}");
-                edisplay_line!(IO, "{msg}");
-                ControlFlow::Break(Err(Error::Query(QueryError::General(msg))))
-            }
+            Err(e) => ControlFlow::Break(Err(Error::Query(
+                QueryError::General(echo_error!(
+                    IO,
+                    "Failed to query node status with error: {e}"
+                )),
+            ))),
         }
     })
     .await

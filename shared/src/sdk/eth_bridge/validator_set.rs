@@ -22,6 +22,7 @@ use crate::eth_bridge::structs::Signature;
 use crate::ledger::queries::RPC;
 use crate::sdk::args;
 use crate::sdk::error::{Error as SdkError, EthereumBridgeError, QueryError};
+use crate::sdk::internal_macros::{echo_error, trace_error};
 use crate::sdk::queries::Client;
 use crate::types::control_flow::install_shutdown_signal;
 use crate::types::control_flow::time::{self, Duration, Instant};
@@ -289,10 +290,10 @@ where
         .read_valset_upd_proof(client, &epoch)
         .await
         .map_err(|err| {
-            let msg =
-                format!("Failed to fetch validator set update proof: {err}");
-            edisplay_line!(IO, "{msg}");
-            SdkError::Query(QueryError::General(msg))
+            SdkError::Query(QueryError::General(echo_error!(
+                IO,
+                "Failed to fetch validator set update proof: {err}"
+            )))
         })?;
 
     display_line!(IO, "0x{}", HEXLOWER.encode(encoded_proof.as_ref()));
@@ -319,9 +320,10 @@ where
         .read_bridge_valset(client, &epoch)
         .await
         .map_err(|err| {
-            let msg = format!("Failed to fetch Bridge validator set: {err}");
-            edisplay_line!(IO, "{msg}");
-            SdkError::Query(QueryError::General(msg))
+            SdkError::Query(QueryError::General(echo_error!(
+                IO,
+                "Failed to fetch Bridge validator set: {err}"
+            )))
         })?;
 
     display_validator_set::<IO>(args.clone());
@@ -348,10 +350,10 @@ where
         .read_governance_valset(client, &epoch)
         .await
         .map_err(|err| {
-            let msg =
-                format!("Failed to fetch Governance validator set: {err}");
-            edisplay_line!(IO, "{msg}");
-            SdkError::Query(QueryError::General(msg))
+            SdkError::Query(QueryError::General(echo_error!(
+                IO,
+                "Failed to fetch Governance validator set: {err}"
+            )))
         })?;
 
     display_validator_set::<IO>(args.clone());
@@ -545,11 +547,10 @@ where
         let bridge_epoch_fut = bridge_epoch_prep_call.call().map(|result| {
             result
                 .map_err(|err| {
-                    let msg = format!(
+                    Error::critical(QueryError::General(trace_error!(
+                        error,
                         "Failed to fetch latest validator set nonce: {err}"
-                    );
-                    tracing::error!("{msg}");
-                    Error::critical(QueryError::General(msg))
+                    )))
                 })
                 .map(|e| e.as_u64() as i128)
         });
@@ -558,11 +559,10 @@ where
         let nam_current_epoch_fut = shell.epoch(nam_client).map(|result| {
             result
                 .map_err(|err| {
-                    let msg = format!(
+                    Error::critical(QueryError::General(trace_error!(
+                        error,
                         "Failed to fetch the latest epoch in Namada: {err}"
-                    );
-                    tracing::error!("{msg}");
-                    Error::critical(QueryError::General(msg))
+                    )))
                 })
                 .map(|Epoch(e)| e as i128)
         });
