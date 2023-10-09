@@ -152,10 +152,10 @@ pub struct MockServiceShellHandlers {
 pub struct MockServices {
     /// Receives transactions that are supposed to be broadcasted
     /// to the network.
-    pub tx_receiver: mpsc::UnboundedReceiver<Vec<u8>>,
+    tx_receiver: mpsc::UnboundedReceiver<Vec<u8>>,
     /// Mock Ethereum oracle, that processes blocks from Ethereum
     /// in order to find events emitted by a transaction to vote on.
-    pub ethereum_oracle: MockEthOracle,
+    ethereum_oracle: MockEthOracle,
 }
 
 /// Actions to be performed by the mock node, as a result
@@ -167,7 +167,7 @@ pub enum MockServiceAction {
 
 impl MockServices {
     /// Drive the internal state machine of the mock node's services.
-    pub async fn drive(&mut self) -> Vec<MockServiceAction> {
+    async fn drive(&mut self) -> Vec<MockServiceAction> {
         let mut actions = vec![];
 
         // process new eth events
@@ -192,13 +192,13 @@ impl MockServices {
 }
 
 /// Mock Ethereum oracle used for testing purposes.
-pub struct MockEthOracle {
+struct MockEthOracle {
     /// The inner oracle.
-    pub oracle: TestOracle,
+    oracle: TestOracle,
     /// The inner oracle's configuration.
-    pub config: OracleConfig,
+    config: OracleConfig,
     /// The inner oracle's next block to process.
-    pub next_block_to_process: ethereum_structs::BlockHeight,
+    next_block_to_process: ethereum_structs::BlockHeight,
 }
 
 impl MockEthOracle {
@@ -208,7 +208,7 @@ impl MockEthOracle {
     /// the shell and updating the height of the next Ethereum
     /// block to process. Upon a successfully processed block,
     /// this functions returns `true`.
-    pub async fn drive(&mut self) -> bool {
+    async fn drive(&mut self) -> bool {
         let new_block = try_process_eth_events(
             &self.oracle,
             &self.config,
@@ -268,15 +268,19 @@ impl MockNode {
         }
     }
 
-    async fn drive_mock_services(&self) {
+    pub async fn drive_mock_services(&self) {
+        let actions = {
+            let mut services = self.services.lock().await;
+            services.drive().await
+        };
+        for action in actions {
+            self.handle_service_action(action).await;
+        }
+    }
+
+    async fn drive_mock_services_bg(&self) {
         if self.auto_drive_services {
-            let actions = {
-                let mut services = self.services.lock().await;
-                services.drive().await
-            };
-            for action in actions {
-                self.handle_service_action(action).await;
-            }
+            self.drive_mock_services().await;
         }
     }
 
@@ -547,7 +551,7 @@ impl<'a> Client for &'a MockNode {
         height: Option<BlockHeight>,
         prove: bool,
     ) -> std::result::Result<EncodedResponseQuery, Self::Error> {
-        self.drive_mock_services().await;
+        self.drive_mock_services_bg().await;
         let rpc = RPC;
         let data = data.unwrap_or_default();
         let latest_height = {
@@ -593,7 +597,7 @@ impl<'a> Client for &'a MockNode {
 
     /// `/abci_info`: get information about the ABCI application.
     async fn abci_info(&self) -> Result<abci_info::AbciInfo, RpcError> {
-        self.drive_mock_services().await;
+        self.drive_mock_services_bg().await;
         let locked = self.shell.lock().unwrap();
         Ok(AbciInfo {
             data: "Namada".to_string(),
@@ -625,7 +629,6 @@ impl<'a> Client for &'a MockNode {
         tx: namada::tendermint::abci::Transaction,
     ) -> Result<tendermint_rpc::endpoint::broadcast::tx_sync::Response, RpcError>
     {
-        self.drive_mock_services().await;
         let mut resp = tendermint_rpc::endpoint::broadcast::tx_sync::Response {
             code: Default::default(),
             data: Default::default(),
@@ -665,7 +668,7 @@ impl<'a> Client for &'a MockNode {
         _order: namada::tendermint_rpc::Order,
     ) -> Result<tendermint_rpc::endpoint::block_search::Response, RpcError>
     {
-        self.drive_mock_services().await;
+        self.drive_mock_services_bg().await;
         let matcher = parse_tm_query(query);
         let borrowed = self.shell.lock().unwrap();
         // we store an index into the event log as a block
@@ -735,7 +738,7 @@ impl<'a> Client for &'a MockNode {
     where
         H: Into<namada::tendermint::block::Height> + Send,
     {
-        self.drive_mock_services().await;
+        self.drive_mock_services_bg().await;
         let height = height.into();
         let encoded_event = EncodedEvent(height.value());
         let locked = self.shell.lock().unwrap();
@@ -794,7 +797,7 @@ impl<'a> Client for &'a MockNode {
     /// Returns empty result (200 OK) on success, no response in case of an
     /// error.
     async fn health(&self) -> Result<(), RpcError> {
-        self.drive_mock_services().await;
+        self.drive_mock_services_bg().await;
         Ok(())
     }
 }
