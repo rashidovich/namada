@@ -263,7 +263,7 @@ impl MockNode {
     pub async fn handle_service_action(&self, action: MockServiceAction) {
         match action {
             MockServiceAction::BroadcastTx(tx) => {
-                _ = self.broadcast_tx_sync(tx.into()).await;
+                _ = self.broadcast_tx_sync_impl(tx.into()).await;
             }
         }
     }
@@ -536,6 +536,41 @@ impl MockNode {
             self.clear_results();
         }
     }
+
+    async fn broadcast_tx_sync_impl(
+        &self,
+        tx: namada::tendermint::abci::Transaction,
+    ) -> Result<tendermint_rpc::endpoint::broadcast::tx_sync::Response, RpcError>
+    {
+        let mut resp = tendermint_rpc::endpoint::broadcast::tx_sync::Response {
+            code: Default::default(),
+            data: Default::default(),
+            log: Default::default(),
+            hash: tendermint::abci::transaction::Hash::new([0; 32]),
+        };
+        let tx_bytes: Vec<u8> = tx.into();
+        self.submit_txs(vec![tx_bytes]);
+        if !self.success() {
+            // TODO: submit_txs should return the correct error code + message
+            resp.code = tendermint::abci::Code::Err(1337);
+            return Ok(resp);
+        } else {
+            self.clear_results();
+        }
+        let (proposer_address, _) = self.prepare_request();
+        let req = RequestPrepareProposal {
+            proposer_address,
+            ..Default::default()
+        };
+        let txs = {
+            let locked = self.shell.lock().unwrap();
+            locked.prepare_proposal(req).txs
+        };
+        if !txs.is_empty() {
+            self.submit_txs(txs);
+        }
+        Ok(resp)
+    }
 }
 
 // TODO: drive mock services
@@ -629,34 +664,8 @@ impl<'a> Client for &'a MockNode {
         tx: namada::tendermint::abci::Transaction,
     ) -> Result<tendermint_rpc::endpoint::broadcast::tx_sync::Response, RpcError>
     {
-        let mut resp = tendermint_rpc::endpoint::broadcast::tx_sync::Response {
-            code: Default::default(),
-            data: Default::default(),
-            log: Default::default(),
-            hash: tendermint::abci::transaction::Hash::new([0; 32]),
-        };
-        let tx_bytes: Vec<u8> = tx.into();
-        self.submit_txs(vec![tx_bytes]);
-        if !self.success() {
-            // TODO: submit_txs should return the correct error code + message
-            resp.code = tendermint::abci::Code::Err(1337);
-            return Ok(resp);
-        } else {
-            self.clear_results();
-        }
-        let (proposer_address, _) = self.prepare_request();
-        let req = RequestPrepareProposal {
-            proposer_address,
-            ..Default::default()
-        };
-        let txs = {
-            let locked = self.shell.lock().unwrap();
-            locked.prepare_proposal(req).txs
-        };
-        if !txs.is_empty() {
-            self.submit_txs(txs);
-        }
-        Ok(resp)
+        self.drive_mock_services_bg().await;
+        self.broadcast_tx_sync_impl(tx).await
     }
 
     /// `/block_search`: search for blocks by BeginBlock and EndBlock events.
