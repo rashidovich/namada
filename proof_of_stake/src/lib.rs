@@ -3052,18 +3052,23 @@ pub fn bond_amount<S>(
 where
     S: StorageRead,
 {
+    // TODO: our method of applying slashes is not correct! This needs review
+
+    println!("FN BOND AMOUNT");
     let params = read_pos_params(storage)?;
 
-    // TODO: review this logic carefully, apply rewards
+    // TODO: apply rewards
     let slashes = find_validator_slashes(storage, &bond_id.validator)?;
-    let slash_rates = slashes.into_iter().fold(
-        BTreeMap::<Epoch, Dec>::new(),
-        |mut map, slash| {
-            let tot_rate = map.entry(slash.epoch).or_default();
-            *tot_rate = cmp::min(Dec::one(), *tot_rate + slash.rate);
-            map
-        },
-    );
+    dbg!(&slashes);
+    let slash_rates =
+        slashes
+            .iter()
+            .fold(BTreeMap::<Epoch, Dec>::new(), |mut map, slash| {
+                let tot_rate = map.entry(slash.epoch).or_default();
+                *tot_rate = cmp::min(Dec::one(), *tot_rate + slash.rate);
+                map
+            });
+    dbg!(&slash_rates);
 
     // Accumulate incoming redelegations slashes from source validator, if any.
     // This ensures that if there're slashes on both src validator and dest
@@ -3084,52 +3089,85 @@ where
             },
             delta,
         ) = res?;
-        let mut slashed_delta = delta;
-        let slashes = find_slashes_in_range(
-            storage,
-            start,
-            Some(redelegation_end),
-            &src_validator,
-        )?;
-        for (slash_epoch, rate) in slashes {
-            let slash_processing_epoch =
-                slash_epoch + params.slash_processing_epoch_offset();
-            // If the slash was processed after redelegation was submitted
-            // it has to be slashed now
-            if slash_processing_epoch > redelegation_end - params.pipeline_len {
-                let slashed = slashed_delta.mul_ceil(rate);
-                slashed_delta -= slashed;
-            }
-        }
+
+        let list_slashes = validator_slashes_handle(&src_validator)
+            .iter(storage)?
+            .map(Result::unwrap)
+            .filter(|slash| {
+                let slash_processing_epoch =
+                    slash.epoch + params.slash_processing_epoch_offset();
+                start <= slash.epoch
+                    && redelegation_end > slash.epoch
+                    && slash_processing_epoch
+                        > redelegation_end - params.pipeline_len
+            })
+            .collect::<Vec<_>>();
+
+        let slashed_delta = apply_list_slashes(&params, &list_slashes, delta);
+
+        // let mut slashed_delta = delta;
+        // let slashes = find_slashes_in_range(
+        //     storage,
+        //     start,
+        //     Some(redelegation_end),
+        //     &src_validator,
+        // )?;
+        // for (slash_epoch, rate) in slashes {
+        //     let slash_processing_epoch =
+        //         slash_epoch + params.slash_processing_epoch_offset();
+        //     // If the slash was processed after redelegation was submitted
+        //     // it has to be slashed now
+        //     if slash_processing_epoch > redelegation_end -
+        // params.pipeline_len {         let slashed =
+        // slashed_delta.mul_ceil(rate);         slashed_delta -=
+        // slashed;     }
+        // }
         *redelegation_slashes.entry(redelegation_end).or_default() +=
             delta - slashed_delta;
     }
+    dbg!(&redelegation_slashes);
 
     let bonds =
         bond_handle(&bond_id.source, &bond_id.validator).get_data_handler();
     let mut total_active = token::Amount::zero();
     for next in bonds.iter(storage)? {
-        let (bond_epoch, delta) = next?;
+        let (bond_epoch, delta) = dbg!(next?);
         if bond_epoch > epoch {
             continue;
         }
-        let mut slashed_delta = delta;
+
+        let list_slashes = slashes
+            .iter()
+            .filter(|slash| bond_epoch <= slash.epoch)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut slashed_delta =
+            apply_list_slashes(&params, &list_slashes, delta);
+
         // Deduct redelegation src validator slash, if any
         if let Some(&redelegation_slash) = redelegation_slashes.get(&bond_epoch)
         {
             slashed_delta -= redelegation_slash;
         }
 
-        for (&slash_epoch, &rate) in &slash_rates {
-            if slash_epoch < bond_epoch {
-                continue;
-            }
-            // TODO: think about truncation
-            let current_slash = slashed_delta.mul_ceil(rate);
-            slashed_delta -= current_slash;
-        }
+        // let list_slashes = slashes
+        //     .iter()
+        //     .map(Result::unwrap)
+        //     .filter(|slash| bond_epoch <= slash.epoch)
+        //     .collect::<Vec<_>>();
+
+        // for (&slash_epoch, &rate) in &slash_rates {
+        //     if slash_epoch < bond_epoch {
+        //         continue;
+        //     }
+        //     // TODO: think about truncation
+        //     let current_slash = slashed_delta.mul_ceil(rate);
+        //     slashed_delta -= current_slash;
+        // }
         total_active += slashed_delta;
     }
+    dbg!(&total_active);
 
     // Add unbonds that are still contributing to stake
     let unbonds = unbond_handle(&bond_id.source, &bond_id.validator);
@@ -3145,17 +3183,27 @@ where
             + params.pipeline_len;
 
         if start <= epoch && end > epoch {
-            let mut slashed_delta = delta;
-            for (&slash_epoch, &rate) in &slash_rates {
-                if start <= slash_epoch && end > slash_epoch {
-                    // TODO: think about truncation
-                    let current_slash = slashed_delta.mul_ceil(rate);
-                    slashed_delta -= current_slash;
-                }
-            }
+            let list_slashes = slashes
+                .iter()
+                .filter(|slash| start <= slash.epoch && end > slash.epoch)
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let slashed_delta =
+                apply_list_slashes(&params, &list_slashes, delta);
+
+            // let mut slashed_delta = delta;
+            // for (&slash_epoch, &rate) in &slash_rates {
+            //     if start <= slash_epoch && end > slash_epoch {
+            //         // TODO: think about truncation
+            //         let current_slash = slashed_delta.mul_ceil(rate);
+            //         slashed_delta -= current_slash;
+            //     }
+            // }
             total_active += slashed_delta;
         }
     }
+    dbg!(&total_active);
 
     if bond_id.validator != bond_id.source {
         // Add outgoing redelegations that are still contributing to the source
@@ -3182,17 +3230,27 @@ where
                 && start <= epoch
                 && end > epoch
             {
-                let mut slashed_delta = delta;
-                for (&slash_epoch, &rate) in &slash_rates {
-                    if start <= slash_epoch && end > slash_epoch {
-                        // TODO: think about truncation
-                        let current_slash = delta.mul_ceil(rate);
-                        slashed_delta -= current_slash;
-                    }
-                }
+                let list_slashes = slashes
+                    .iter()
+                    .filter(|slash| start <= slash.epoch && end > slash.epoch)
+                    .cloned()
+                    .collect::<Vec<_>>();
+
+                let slashed_delta =
+                    apply_list_slashes(&params, &list_slashes, delta);
+
+                // let mut slashed_delta = delta;
+                // for (&slash_epoch, &rate) in &slash_rates {
+                //     if start <= slash_epoch && end > slash_epoch {
+                //         // TODO: think about truncation
+                //         let current_slash = delta.mul_ceil(rate);
+                //         slashed_delta -= current_slash;
+                //     }
+                // }
                 total_active += slashed_delta;
             }
         }
+        dbg!(&total_active);
 
         // Add outgoing redelegation unbonds that are still contributing to
         // the source validator's stake
@@ -3228,17 +3286,27 @@ where
                 // ... and the end after this epoch
                 && end > epoch
             {
-                let mut slashed_delta = delta;
-                for (&slash_epoch, &rate) in &slash_rates {
-                    if start <= slash_epoch && end > slash_epoch {
-                        let current_slash = delta.mul_ceil(rate);
-                        slashed_delta -= current_slash;
-                    }
-                }
+                let list_slashes = slashes
+                    .iter()
+                    .filter(|slash| start <= slash.epoch && end > slash.epoch)
+                    .cloned()
+                    .collect::<Vec<_>>();
+
+                let slashed_delta =
+                    apply_list_slashes(&params, &list_slashes, delta);
+
+                // let mut slashed_delta = delta;
+                // for (&slash_epoch, &rate) in &slash_rates {
+                //     if start <= slash_epoch && end > slash_epoch {
+                //         let current_slash = delta.mul_ceil(rate);
+                //         slashed_delta -= current_slash;
+                //     }
+                // }
                 total_active += slashed_delta;
             }
         }
     }
+    dbg!(&total_active);
 
     Ok(total_active)
 }
