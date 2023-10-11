@@ -571,7 +571,6 @@ impl MockNode {
     }
 }
 
-// TODO: drive mock services
 #[cfg_attr(feature = "async-send", async_trait::async_trait)]
 #[cfg_attr(not(feature = "async-send"), async_trait::async_trait(?Send))]
 impl<'a> Client for &'a MockNode {
