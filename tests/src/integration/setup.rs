@@ -150,7 +150,7 @@ fn create_node(
         ))),
         test_dir: ManuallyDrop::new(base_dir),
         keep_temp,
-        services: Arc::new(tokio::sync::Mutex::new(services)),
+        services: Arc::new(services),
         results: Arc::new(Mutex::new(vec![])),
         auto_drive_services,
     };

@@ -104,13 +104,13 @@ pub fn mock_services(cfg: MockServicesCfg) -> MockServicesPackage {
     let ethereum_oracle = MockEthOracle {
         oracle,
         config: Default::default(),
-        next_block_to_process: Default::default(),
+        next_block_to_process: tokio::sync::RwLock::new(Default::default()),
     };
     MockServicesPackage {
         auto_drive_services: cfg.auto_drive_services,
         services: MockServices {
-            tx_receiver,
             ethereum_oracle,
+            tx_receiver: tokio::sync::Mutex::new(tx_receiver),
         },
         shell_handlers: MockServiceShellHandlers {
             tx_broadcaster: tx_broadcaster.clone(),
@@ -152,7 +152,7 @@ pub struct MockServiceShellHandlers {
 pub struct MockServices {
     /// Receives transactions that are supposed to be broadcasted
     /// to the network.
-    tx_receiver: mpsc::UnboundedReceiver<Vec<u8>>,
+    tx_receiver: tokio::sync::Mutex<mpsc::UnboundedReceiver<Vec<u8>>>,
     /// Mock Ethereum oracle, that processes blocks from Ethereum
     /// in order to find events emitted by a transaction to vote on.
     ethereum_oracle: MockEthOracle,
@@ -163,26 +163,30 @@ pub struct MockServices {
 pub enum MockServiceAction {
     /// The ledger should broadcast a new transaction.
     BroadcastTx(Vec<u8>),
+    /// Progress to the next Ethereum block to process.
+    IncrementEthHeight,
 }
 
 impl MockServices {
     /// Drive the internal state machine of the mock node's services.
-    async fn drive(&mut self) -> Vec<MockServiceAction> {
+    async fn drive(&self) -> Vec<MockServiceAction> {
         let mut actions = vec![];
 
         // process new eth events
         // NOTE: this may result in a deadlock, if the events
         // sent to the shell exceed the capacity of the oracle's
         // events channel!
-        self.ethereum_oracle.drive().await;
+        if self.ethereum_oracle.drive().await {
+            actions.push(MockServiceAction::IncrementEthHeight);
+        }
 
         // receive txs from the broadcaster
-        while let Some(tx) =
-            poll_fn(|cx| match self.tx_receiver.poll_recv(cx) {
-                Poll::Pending => Poll::Ready(None),
-                poll => poll,
-            })
-            .await
+        let mut tx_receiver = self.tx_receiver.lock().await;
+        while let Some(tx) = poll_fn(|cx| match tx_receiver.poll_recv(cx) {
+            Poll::Pending => Poll::Ready(None),
+            poll => poll,
+        })
+        .await
         {
             actions.push(MockServiceAction::BroadcastTx(tx));
         }
@@ -198,7 +202,7 @@ struct MockEthOracle {
     /// The inner oracle's configuration.
     config: OracleConfig,
     /// The inner oracle's next block to process.
-    next_block_to_process: ethereum_structs::BlockHeight,
+    next_block_to_process: tokio::sync::RwLock<ethereum_structs::BlockHeight>,
 }
 
 impl MockEthOracle {
@@ -208,18 +212,14 @@ impl MockEthOracle {
     /// the shell and updating the height of the next Ethereum
     /// block to process. Upon a successfully processed block,
     /// this functions returns `true`.
-    async fn drive(&mut self) -> bool {
-        let new_block = try_process_eth_events(
+    async fn drive(&self) -> bool {
+        try_process_eth_events(
             &self.oracle,
             &self.config,
-            &self.next_block_to_process,
+            &*self.next_block_to_process.read().await,
         )
         .await
-        .process_new_block();
-        if new_block {
-            self.next_block_to_process += 1.into();
-        }
-        new_block
+        .process_new_block()
     }
 }
 
@@ -239,7 +239,7 @@ pub struct MockNode {
     pub test_dir: ManuallyDrop<TestDir>,
     pub keep_temp: bool,
     pub results: Arc<Mutex<Vec<NodeResults>>>,
-    pub services: Arc<tokio::sync::Mutex<MockServices>>,
+    pub services: Arc<MockServices>,
     pub auto_drive_services: bool,
 }
 
@@ -265,15 +265,19 @@ impl MockNode {
             MockServiceAction::BroadcastTx(tx) => {
                 _ = self.broadcast_tx_sync_impl(tx.into()).await;
             }
+            MockServiceAction::IncrementEthHeight => {
+                *self
+                    .services
+                    .ethereum_oracle
+                    .next_block_to_process
+                    .write()
+                    .await += 1.into();
+            }
         }
     }
 
     pub async fn drive_mock_services(&self) {
-        let actions = {
-            let mut services = self.services.lock().await;
-            services.drive().await
-        };
-        for action in actions {
+        for action in self.services.drive().await {
             self.handle_service_action(action).await;
         }
     }
@@ -583,7 +587,9 @@ impl<'a> Client for &'a MockNode {
         height: Option<BlockHeight>,
         prove: bool,
     ) -> std::result::Result<EncodedResponseQuery, Self::Error> {
+        // println!("DRIVE BEGIN");
         self.drive_mock_services_bg().await;
+        // println!("DRIVE END");
         let rpc = RPC;
         let data = data.unwrap_or_default();
         let latest_height = {
