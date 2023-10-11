@@ -404,7 +404,7 @@ impl MockNode {
                     })
                     .collect()
             };
-            let mut req = FinalizeBlock {
+            FinalizeBlock {
                 hash: BlockHash([0u8; 32]),
                 header: Header {
                     hash: Hash([0; 32]),
@@ -415,9 +415,7 @@ impl MockNode {
                 txs,
                 proposer_address,
                 votes,
-            };
-            req.header.time = DateTimeUtc::now();
-            req
+            }
         };
 
         locked.finalize_block(req).expect("Test failed");
