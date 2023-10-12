@@ -5229,6 +5229,10 @@ where
     // The unbonded amount after slashing is what is going to be redelegated.
     // `amountAfterSlashing`
     let amount_after_slashing = result_unbond.sum;
+    tracing::debug!(
+        "Redelegated amount after slashing: {}",
+        amount_after_slashing.to_string_native()
+    );
 
     // Add incoming redelegated bonds to the dest validator.
     // `updatedRedelegatedBonds` with updates to delegatorState
