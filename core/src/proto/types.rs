@@ -1250,10 +1250,10 @@ impl Tx {
         Section::Header(self.header.clone()).get_hash()
     }
 
-    /// Gets the hash of the raw transaction's header
-    pub fn raw_header_hash(&self) -> crate::types::hash::Hash {
+    /// Gets the hash of the decrypted transaction's header
+    pub fn decrypted_header_hash(&self) -> crate::types::hash::Hash {
         let mut raw_header = self.header();
-        raw_header.tx_type = TxType::Raw;
+        raw_header.tx_type = TxType::Decrypted(DecryptedTx::Decrypted);
 
         Section::Header(raw_header).get_hash()
     }
@@ -1773,8 +1773,8 @@ impl Tx {
         account_public_keys_map: AccountPublicKeysMap,
         signer: Option<Address>,
     ) -> &mut Self {
-        // The inner tx signer signs the Raw version of the Header
-        let hashes = vec![self.raw_header_hash()];
+        // The inner tx signer signs the Decrypted version of the Header
+        let hashes = vec![self.decrypted_header_hash()];
         self.protocol_filter();
 
         self.add_section(Section::Signature(Signature::new(
@@ -1792,7 +1792,7 @@ impl Tx {
     ) -> &mut Self {
         self.protocol_filter();
         let mut pk_section = Signature {
-            targets: self.inner_section_targets(),
+            targets: vec![self.decrypted_header_hash()],
             signatures: BTreeMap::new(),
             signer: Signer::PubKeys(vec![]),
         };
@@ -1803,7 +1803,7 @@ impl Tx {
                 // Add the signature under the given multisig address
                 let section =
                     sections.entry(addr.clone()).or_insert_with(|| Signature {
-                        targets: self.inner_section_targets(),
+                        targets: vec![self.decrypted_header_hash()],
                         signatures: BTreeMap::new(),
                         signer: Signer::Address(addr.clone()),
                     });
