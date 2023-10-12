@@ -161,44 +161,101 @@ impl AbstractPosState {
         // The amount requested is before any slashing that may be applicable
         let mut to_unbond = amount;
         let mut amount_after_slashing = token::Amount::zero();
-        // Try to unbond redelegations first. We have to go in reverse order
-        // of the start epoch to match the order of unbonding in the
-        // implementation.
+
         'bonds_iter: for (&start, bond) in records.bonds.iter_mut().rev() {
-            for (dest_validator, redeleg) in bond.incoming_redelegs.iter_mut() {
+            // In every loop, try to unbond redelegations first. We have to
+            // go in reverse order of the start epoch to match the order of
+            // unbond in the implementation.
+            for (dest_validator, redelegs) in bond.incoming_redelegs.iter_mut()
+            {
                 let redeleg_epoch = start - pipeline_len;
-                // Slashes that were processed before redelegation are applied
-                // eagerly, so when we request some token amount, it will be
-                // unbonded from the amount after slashing, not before slashing
-                // as is the case with lazy slashes. In here, we only add back
-                // the lazy slashes that were processed after redelegation.
+
+                for (&src_bond_start, redeleg) in
+                    redelegs.tokens.iter_mut().rev()
+                {
+                    let amount_before_slashing =
+                        redeleg.amount_before_slashing();
+
+                    let unbonded = if to_unbond >= amount_before_slashing {
+                        // Unbond the whole bond
+                        to_unbond -= amount_before_slashing;
+                        amount_after_slashing += redeleg.amount;
+
+                        mem::take(redeleg)
+                    } else {
+                        // We have to divide this bond in case there are slashes
+                        let unbond_slash =
+                            to_unbond.mul_ceil(redeleg.slash_rates_sum());
+                        let to_unbond_after_slash = to_unbond - unbond_slash;
+
+                        to_unbond = token::Amount::zero();
+                        amount_after_slashing += to_unbond_after_slash;
+
+                        redeleg.amount -= to_unbond_after_slash;
+                        let removed_slashes =
+                            redeleg.subtract_slash(unbond_slash);
+
+                        TokensWithSlashes {
+                            amount: to_unbond_after_slash,
+                            slashes: removed_slashes,
+                        }
+                    };
+
+                    let unbond =
+                        bond.unbonds.entry(end).or_insert_with(|| Unbond {
+                            withdrawable_epoch,
+                            tokens: Default::default(),
+                            incoming_redelegs: Default::default(),
+                        });
+                    debug_assert_eq!(
+                        unbond.withdrawable_epoch,
+                        withdrawable_epoch
+                    );
+                    let redeleg_unbond = unbond
+                        .incoming_redelegs
+                        .entry(dest_validator.clone())
+                        .or_default();
+                    let redeleg_unbond_tokens = redeleg_unbond
+                        .tokens
+                        .entry(src_bond_start)
+                        .or_default();
+                    redeleg_unbond_tokens.amount += unbonded.amount;
+                    redeleg_unbond_tokens.add_slashes(&unbonded.slashes);
+
+                    // Stop once all is unbonded
+                    if to_unbond.is_zero() {
+                        break 'bonds_iter;
+                    }
+                }
+            }
+
+            // Then try to unbond regular bonds
+            if !to_unbond.is_zero() {
                 let amount_before_slashing =
-                    redeleg.amount_before_slashing_after_redeleg(redeleg_epoch);
+                    bond.tokens.amount_before_slashing();
 
                 let unbonded = if to_unbond >= amount_before_slashing {
                     // Unbond the whole bond
                     to_unbond -= amount_before_slashing;
-                    amount_after_slashing += redeleg.tokens.amount;
+                    amount_after_slashing += bond.tokens.amount;
 
-                    mem::take(redeleg)
+                    mem::take(&mut bond.tokens)
                 } else {
                     // We have to divide this bond in case there are slashes
                     let unbond_slash =
-                        to_unbond.mul_ceil(redeleg.tokens.slash_rates_sum());
+                        to_unbond.mul_ceil(bond.tokens.slash_rates_sum());
                     let to_unbond_after_slash = to_unbond - unbond_slash;
 
                     to_unbond = token::Amount::zero();
                     amount_after_slashing += to_unbond_after_slash;
 
-                    redeleg.tokens.amount -= to_unbond_after_slash;
+                    bond.tokens.amount -= to_unbond_after_slash;
                     let removed_slashes =
-                        redeleg.tokens.subtract_slash(unbond_slash);
+                        bond.tokens.subtract_slash(unbond_slash);
 
-                    IncomingRedeleg {
-                        tokens: TokensWithSlashes {
-                            amount: to_unbond_after_slash,
-                            slashes: removed_slashes,
-                        },
+                    TokensWithSlashes {
+                        amount: to_unbond_after_slash,
+                        slashes: removed_slashes,
                     }
                 };
 
@@ -209,64 +266,17 @@ impl AbstractPosState {
                         incoming_redelegs: Default::default(),
                     });
                 debug_assert_eq!(unbond.withdrawable_epoch, withdrawable_epoch);
-                let redeleg_unbond = unbond
-                    .incoming_redelegs
-                    .entry(dest_validator.clone())
-                    .or_default();
-                redeleg_unbond.tokens.amount += unbonded.tokens.amount;
-                redeleg_unbond.tokens.add_slashes(&unbonded.tokens.slashes);
+                unbond.tokens.amount += unbonded.amount;
+                unbond.tokens.add_slashes(&unbonded.slashes);
 
                 // Stop once all is unbonded
                 if to_unbond.is_zero() {
-                    break 'bonds_iter;
+                    break;
                 }
             }
         }
+        assert!(to_unbond.is_zero());
 
-        // Then try to unbond regular bonds
-        for (_start, bond) in records.bonds.iter_mut().rev() {
-            let amount_before_slashing = bond.tokens.amount_before_slashing();
-
-            let unbonded = if to_unbond >= amount_before_slashing {
-                // Unbond the whole bond
-                to_unbond -= amount_before_slashing;
-                amount_after_slashing += bond.tokens.amount;
-
-                mem::take(&mut bond.tokens)
-            } else {
-                // We have to divide this bond in case there are slashes
-                let unbond_slash =
-                    to_unbond.mul_ceil(bond.tokens.slash_rates_sum());
-                let to_unbond_after_slash = to_unbond - unbond_slash;
-
-                to_unbond = token::Amount::zero();
-                amount_after_slashing += to_unbond_after_slash;
-
-                bond.tokens.amount -= to_unbond_after_slash;
-                let removed_slashes = bond.tokens.subtract_slash(unbond_slash);
-
-                TokensWithSlashes {
-                    amount: to_unbond_after_slash,
-                    slashes: removed_slashes,
-                }
-            };
-
-            let unbond = bond.unbonds.entry(end).or_insert_with(|| Unbond {
-                withdrawable_epoch,
-                tokens: Default::default(),
-                incoming_redelegs: Default::default(),
-            });
-            debug_assert_eq!(unbond.withdrawable_epoch, withdrawable_epoch);
-            unbond.tokens.amount += unbonded.amount;
-            unbond.tokens.add_slashes(&unbonded.slashes);
-
-            // Stop once all is unbonded
-            if to_unbond.is_zero() {
-                break;
-            }
-        }
-
-        // dbg!(amount_after_slashing);
         let pipeline_state = self
             .validator_states
             .get(&self.pipeline())
@@ -306,79 +316,86 @@ impl AbstractPosState {
         // The amount requested is before any slashing that may be applicable
         let mut to_unbond = amount;
         let mut amount_after_slashing = token::Amount::zero();
-        let mut dest_incoming_redelegs = TokensWithSlashes::default();
-
-        // dbg!(to_unbond);
+        // Keyed by redelegation src bond start epoch
+        let mut dest_incoming_redelegs =
+            BTreeMap::<Epoch, TokensWithSlashes>::new();
 
         'bonds_iter: for (&start, bond) in records.bonds.iter_mut().rev() {
             // In every loop, try to redelegate redelegations first. We have to
             // go in reverse order of the start epoch to match the order of
             // redelegation in the implementation.
-            for (_src_validator, redeleg) in
+            for (_src_validator, redelegs) in
                 bond.incoming_redelegs.iter_mut().rev()
             {
-                // No chained redelegations
-                if Epoch(start.0.checked_sub(pipeline_len).unwrap_or_default())
-                    + withdrawable_epoch_offset
-                    <= current_epoch
+                let redeleg_epoch = start - pipeline_len;
+
+                for (_src_bond_start, redeleg) in
+                    redelegs.tokens.iter_mut().rev()
                 {
-                    let redeleg_epoch = start - pipeline_len;
-                    // The same slashes reasoning applies as in `fn unbond`.
-                    let amount_before_slashing = redeleg
-                        .amount_before_slashing_after_redeleg(redeleg_epoch);
+                    let amount_before_slashing =
+                        redeleg.amount_before_slashing();
 
-                    let unbonded = if to_unbond >= amount_before_slashing {
-                        // Unbond the whole bond
-                        to_unbond -= amount_before_slashing;
-                        amount_after_slashing += redeleg.tokens.amount;
+                    // No chained redelegations
+                    if Epoch(
+                        start.0.checked_sub(pipeline_len).unwrap_or_default(),
+                    ) + withdrawable_epoch_offset
+                        <= current_epoch
+                    {
+                        let unbonded = if to_unbond >= amount_before_slashing {
+                            // Unbond the whole bond
+                            to_unbond -= amount_before_slashing;
+                            amount_after_slashing += redeleg.amount;
 
-                        mem::take(redeleg)
-                    } else {
-                        // We have to divide this bond in case there are slashes
-                        let unbond_slash = to_unbond
-                            .mul_ceil(redeleg.tokens.slash_rates_sum());
-                        let to_unbond_after_slash = to_unbond - unbond_slash;
+                            mem::take(redeleg)
+                        } else {
+                            // We have to divide this bond in case there are
+                            // slashes
+                            let unbond_slash =
+                                to_unbond.mul_ceil(redeleg.slash_rates_sum());
+                            let to_unbond_after_slash =
+                                to_unbond - unbond_slash;
 
-                        to_unbond = token::Amount::zero();
-                        amount_after_slashing += to_unbond_after_slash;
+                            to_unbond = token::Amount::zero();
+                            amount_after_slashing += to_unbond_after_slash;
 
-                        redeleg.tokens.amount -= to_unbond_after_slash;
-                        let removed_slashes =
-                            redeleg.tokens.subtract_slash(unbond_slash);
+                            redeleg.amount -= to_unbond_after_slash;
+                            let removed_slashes =
+                                redeleg.subtract_slash(unbond_slash);
 
-                        IncomingRedeleg {
-                            tokens: TokensWithSlashes {
+                            TokensWithSlashes {
                                 amount: to_unbond_after_slash,
                                 slashes: removed_slashes,
-                            },
+                            }
+                        };
+
+                        let outgoing_redeleg = bond
+                            .outgoing_redelegs
+                            .entry(src_end)
+                            .or_default()
+                            .entry(new_validator.clone())
+                            .or_default();
+
+                        outgoing_redeleg.amount += unbonded.amount;
+                        outgoing_redeleg.add_slashes(&unbonded.slashes);
+
+                        let redeleg =
+                            dest_incoming_redelegs.entry(start).or_default();
+                        redeleg.amount += unbonded.amount;
+                        redeleg.add_slashes(&unbonded.slashes);
+
+                        // Stop once all is unbonded
+                        if to_unbond.is_zero() {
+                            break 'bonds_iter;
                         }
-                    };
-
-                    let outgoing_redeleg = bond
-                        .outgoing_redelegs
-                        .entry(src_end)
-                        .or_default()
-                        .entry(new_validator.clone())
-                        .or_default();
-                    outgoing_redeleg.amount += unbonded.tokens.amount;
-                    outgoing_redeleg.add_slashes(&unbonded.tokens.slashes);
-
-                    dest_incoming_redelegs.amount += unbonded.tokens.amount;
-                    dest_incoming_redelegs
-                        .add_slashes(&unbonded.tokens.slashes);
-
-                    // Stop once all is unbonded
-                    if to_unbond.is_zero() {
-                        break 'bonds_iter;
                     }
                 }
             }
 
-            // Then try to unbond regular bonds
-            // dbg!(to_unbond, start, &bond.tokens);
-            let amount_before_slashing = bond.tokens.amount_before_slashing();
-
+            // Then try to redelegate regular bonds
             if !to_unbond.is_zero() {
+                let amount_before_slashing =
+                    bond.tokens.amount_before_slashing();
+
                 let unbonded = if to_unbond >= amount_before_slashing {
                     // Unbond the whole bond
                     to_unbond -= amount_before_slashing;
@@ -412,15 +429,15 @@ impl AbstractPosState {
                     .or_default();
                 outgoing_redeleg.amount += unbonded.amount;
                 outgoing_redeleg.add_slashes(&unbonded.slashes);
-
-                dest_incoming_redelegs.amount += unbonded.amount;
-                dest_incoming_redelegs.add_slashes(&unbonded.slashes);
+                let dest_incoming_redeleg =
+                    dest_incoming_redelegs.entry(start).or_default();
+                dest_incoming_redeleg.amount += unbonded.amount;
+                dest_incoming_redeleg.add_slashes(&unbonded.slashes);
             }
             // Stop once all is unbonded
             if to_unbond.is_zero() {
                 break;
             }
-            // dbg!(to_unbond, start, &bond.tokens);
         }
         assert!(to_unbond.is_zero());
 
@@ -433,8 +450,11 @@ impl AbstractPosState {
             .incoming_redelegs
             .entry(validator.clone())
             .or_default();
-        redeleg.tokens.amount += dest_incoming_redelegs.amount;
-        redeleg.tokens.add_slashes(&dest_incoming_redelegs.slashes);
+        for (start, inc_redeleg) in dest_incoming_redelegs {
+            let redeleg_tokens = redeleg.tokens.entry(start).or_default();
+            redeleg_tokens.amount += inc_redeleg.amount;
+            redeleg_tokens.add_slashes(&inc_redeleg.slashes);
+        }
 
         // Update stake of src validator
         let src_pipeline_state = self
@@ -490,8 +510,10 @@ impl AbstractPosState {
                     withdrawn.amount += unbond.tokens.amount;
                     withdrawn.add_slashes(&unbond.tokens.slashes);
                     for redeleg in unbond.incoming_redelegs.values() {
-                        withdrawn.amount += redeleg.tokens.amount;
-                        withdrawn.add_slashes(&redeleg.tokens.slashes);
+                        for tokens in redeleg.tokens.values() {
+                            withdrawn.amount += tokens.amount;
+                            withdrawn.add_slashes(&tokens.slashes);
+                        }
                     }
                 }
                 !is_withdrawable
@@ -874,7 +896,7 @@ impl AbstractPosState {
 
         let mut redelegations_to_slash = BTreeMap::<
             Address,
-            BTreeMap<Address, BTreeMap<Epoch, TokensSlash>>,
+            BTreeMap<Address, BTreeMap<Epoch, BTreeMap<Epoch, TokensSlash>>>,
         >::new();
         for (addr, records) in self.validator_records.iter_mut() {
             if addr == validator {
@@ -908,6 +930,9 @@ impl AbstractPosState {
                                             // start epoch of redelegation
                                             end.next(),
                                         )
+                                        .or_default()
+                                        // redelegation src bond start epoch
+                                        .entry(start)
                                         .or_default() += TokensSlash {
                                         amount: slashed,
                                         rate: total_rate,
@@ -922,20 +947,23 @@ impl AbstractPosState {
         // Apply redelegation slashes on destination validator
         for (dest_validator, redelegations) in redelegations_to_slash {
             for (source, tokens) in redelegations {
-                for (redelegation_start, slash) in tokens {
-                    let records = self
-                        .validator_records
-                        .get_mut(&dest_validator)
-                        .unwrap()
-                        .per_source
-                        .get_mut(&source)
-                        .unwrap();
-                    records.subtract_redelegation_slash(
-                        validator,
-                        redelegation_start,
-                        slash,
-                        current_epoch,
-                    );
+                for (redelegation_start, slashes) in tokens {
+                    for (src_bond_start, slash) in slashes {
+                        let records = self
+                            .validator_records
+                            .get_mut(&dest_validator)
+                            .unwrap()
+                            .per_source
+                            .get_mut(&source)
+                            .unwrap();
+                        records.subtract_redelegation_slash(
+                            validator,
+                            src_bond_start,
+                            redelegation_start,
+                            slash,
+                            current_epoch,
+                        );
+                    }
                 }
             }
         }
@@ -1102,8 +1130,7 @@ impl AbstractPosState {
                             ) + self.params.withdrawable_epoch_offset()
                                 <= self.epoch
                             {
-                                *unbondable +=
-                                    redeleg.tokens.amount_before_slashing();
+                                *unbondable += redeleg.amount_before_slashing();
                             }
                         }
                     }
@@ -1435,9 +1462,10 @@ impl Records {
 
                         // Unbonded incoming redelegations
                         for redelegs in unbond.incoming_redelegs.values() {
-                            total += redelegs.tokens.amount;
-                            total +=
-                                redelegs.tokens.slashes_sum_after_epoch(epoch);
+                            for tokens in redelegs.tokens.values() {
+                                total += tokens.amount;
+                                total += tokens.slashes_sum_after_epoch(epoch);
+                            }
                         }
                     }
                 }
@@ -1454,8 +1482,10 @@ impl Records {
 
                 // Incoming redelegations
                 for redelegs in bond.incoming_redelegs.values() {
-                    total += redelegs.tokens.amount;
-                    total += redelegs.tokens.slashes_sum_after_epoch(epoch);
+                    for tokens in redelegs.tokens.values() {
+                        total += tokens.amount;
+                        total += tokens.slashes_sum_after_epoch(epoch);
+                    }
                 }
             }
         }
@@ -1484,6 +1514,7 @@ impl Records {
     fn subtract_redelegation_slash(
         &mut self,
         src_validator: &Address,
+        src_bond_start: Epoch,
         redelegation_start: Epoch,
         mut to_sub: TokensSlash,
         processing_epoch: Epoch,
@@ -1495,25 +1526,31 @@ impl Records {
             if let Some(redeleg) =
                 unbond.incoming_redelegs.get_mut(src_validator)
             {
-                if redeleg.tokens.amount >= to_sub.amount {
-                    redeleg.tokens.amount -= to_sub.amount;
-                    *redeleg.tokens.slashes.entry(slash_epoch).or_default() +=
-                        to_sub;
-                    return;
-                } else {
-                    to_sub.amount -= redeleg.tokens.amount;
-                    *redeleg.tokens.slashes.entry(slash_epoch).or_default() +=
-                        TokensSlash {
-                            amount: redeleg.tokens.amount,
-                            rate: to_sub.rate,
-                        };
-                    redeleg.tokens.amount = token::Amount::zero();
+                if let Some(tokens) = redeleg.tokens.get_mut(&src_bond_start) {
+                    if tokens.amount >= to_sub.amount {
+                        tokens.amount -= to_sub.amount;
+                        *tokens.slashes.entry(slash_epoch).or_default() +=
+                            to_sub;
+                        return;
+                    } else {
+                        to_sub.amount -= tokens.amount;
+                        *tokens.slashes.entry(slash_epoch).or_default() +=
+                            TokensSlash {
+                                amount: tokens.amount,
+                                rate: to_sub.rate,
+                            };
+                        tokens.amount = token::Amount::zero();
+                    }
                 }
             }
         }
         let redeleg = bond.incoming_redelegs.get_mut(src_validator).unwrap();
-        redeleg.tokens.amount -= to_sub.amount;
-        *redeleg.tokens.slashes.entry(slash_epoch).or_default() += to_sub;
+        if let Some(tokens) = redeleg.tokens.get_mut(&src_bond_start) {
+            tokens.amount -= to_sub.amount;
+            *tokens.slashes.entry(slash_epoch).or_default() += to_sub;
+        } else {
+            debug_assert!(to_sub.amount.is_zero());
+        }
     }
 
     /// Find how much slash rounding error at most can be tolerated for slashes
@@ -1542,12 +1579,16 @@ impl Records {
         for bond in self.bonds.values() {
             unique_count += bond.tokens.num_of_slashes(epoch);
             for redeleg in bond.incoming_redelegs.values() {
-                unique_count += redeleg.tokens.num_of_slashes(epoch);
+                for tokens in redeleg.tokens.values() {
+                    unique_count += tokens.num_of_slashes(epoch);
+                }
             }
             for unbond in bond.unbonds.values() {
                 unique_count += unbond.tokens.num_of_slashes(epoch);
                 for redeleg in unbond.incoming_redelegs.values() {
-                    unique_count += redeleg.tokens.num_of_slashes(epoch);
+                    for tokens in redeleg.tokens.values() {
+                        unique_count += tokens.num_of_slashes(epoch);
+                    }
                 }
             }
         }
@@ -1589,17 +1630,17 @@ impl Bond {
     ) {
         self.tokens.slash(rate, infraction_epoch, processing_epoch);
         for (_src, redeleg) in self.incoming_redelegs.iter_mut() {
-            redeleg
-                .tokens
-                .slash(rate, infraction_epoch, processing_epoch);
+            for tokens in redeleg.tokens.values_mut() {
+                tokens.slash(rate, infraction_epoch, processing_epoch);
+            }
         }
     }
 }
 
 #[derive(Clone, Debug, Default)]
 struct IncomingRedeleg {
-    /// Total amount with all slashes
-    tokens: TokensWithSlashes,
+    /// Total amount with all slashes keyed by redelegation source bond start
+    tokens: BTreeMap<Epoch, TokensWithSlashes>,
 }
 impl IncomingRedeleg {
     /// Get the token amount before any slashes that were processed after the
@@ -1608,13 +1649,20 @@ impl IncomingRedeleg {
         &self,
         redeleg_epoch: Epoch,
     ) -> token::Amount {
-        let mut amount = self.tokens.amount;
-        for (&processed_epoch, slash) in &self.tokens.slashes {
-            if processed_epoch > redeleg_epoch {
-                amount += slash.amount;
-            }
-        }
-        amount
+        self.tokens
+            .values()
+            .map(|tokens| {
+                tokens.amount_before_slashing_after_redeleg(redeleg_epoch)
+            })
+            .sum()
+    }
+
+    // Get the token amount before any slashing.
+    fn amount_before_slashing(&self) -> token::Amount {
+        self.tokens
+            .values()
+            .map(TokensWithSlashes::amount_before_slashing)
+            .sum()
     }
 }
 
@@ -1706,6 +1754,21 @@ impl TokensWithSlashes {
         self.amount + self.slashes_sum()
     }
 
+    /// Get the token amount before any slashes that were processed after the
+    /// redelegation epoch.
+    fn amount_before_slashing_after_redeleg(
+        &self,
+        redeleg_epoch: Epoch,
+    ) -> token::Amount {
+        let mut amount = self.amount;
+        for (&processed_epoch, slash) in &self.slashes {
+            if processed_epoch > redeleg_epoch {
+                amount += slash.amount;
+            }
+        }
+        amount
+    }
+
     /// Get a sum of all slash amounts.
     fn slashes_sum(&self) -> token::Amount {
         self.slashes
@@ -1766,12 +1829,12 @@ impl Unbond {
     /// redelegations.
     fn amount_before_slashing(&self) -> token::Amount {
         self.tokens.amount_before_slashing()
-            + self.incoming_redelegs.iter().fold(
-                token::Amount::zero(),
-                |acc, (_src, redeleg)| {
-                    acc + redeleg.tokens.amount_before_slashing()
-                },
-            )
+            + self
+                .incoming_redelegs
+                .iter()
+                .fold(token::Amount::zero(), |acc, (_src, redeleg)| {
+                    acc + redeleg.amount_before_slashing()
+                })
     }
 
     fn slash(
@@ -1782,9 +1845,9 @@ impl Unbond {
     ) {
         self.tokens.slash(rate, infraction_epoch, processing_epoch);
         for (_src, redeleg) in self.incoming_redelegs.iter_mut() {
-            redeleg
-                .tokens
-                .slash(rate, infraction_epoch, processing_epoch);
+            for tokens in redeleg.tokens.values_mut() {
+                tokens.slash(rate, infraction_epoch, processing_epoch);
+            }
         }
     }
 }
