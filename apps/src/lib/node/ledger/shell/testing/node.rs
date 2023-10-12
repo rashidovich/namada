@@ -263,7 +263,7 @@ impl MockNode {
     pub async fn handle_service_action(&self, action: MockServiceAction) {
         match action {
             MockServiceAction::BroadcastTx(tx) => {
-                _ = self.broadcast_tx_sync_impl(tx.into()).await;
+                _ = self.broadcast_tx_sync_impl(tx.into());
             }
             MockServiceAction::IncrementEthHeight => {
                 *self
@@ -539,7 +539,7 @@ impl MockNode {
         }
     }
 
-    async fn broadcast_tx_sync_impl(
+    fn broadcast_tx_sync_impl(
         &self,
         tx: namada::tendermint::abci::Transaction,
     ) -> Result<tendermint_rpc::endpoint::broadcast::tx_sync::Response, RpcError>
@@ -668,7 +668,7 @@ impl<'a> Client for &'a MockNode {
     ) -> Result<tendermint_rpc::endpoint::broadcast::tx_sync::Response, RpcError>
     {
         self.drive_mock_services_bg().await;
-        self.broadcast_tx_sync_impl(tx).await
+        self.broadcast_tx_sync_impl(tx)
     }
 
     /// `/block_search`: search for blocks by BeginBlock and EndBlock events.
