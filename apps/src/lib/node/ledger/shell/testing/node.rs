@@ -161,8 +161,8 @@ pub struct MockServices {
 /// Actions to be performed by the mock node, as a result
 /// of driving [`MockServices`].
 pub enum MockServiceAction {
-    /// The ledger should broadcast a new transaction.
-    BroadcastTx(Vec<u8>),
+    /// The ledger should broadcast new transactions.
+    BroadcastTxs(Vec<Vec<u8>>),
     /// Progress to the next Ethereum block to process.
     IncrementEthHeight,
 }
@@ -181,14 +181,23 @@ impl MockServices {
         }
 
         // receive txs from the broadcaster
-        let mut tx_receiver = self.tx_receiver.lock().await;
-        while let Some(tx) = poll_fn(|cx| match tx_receiver.poll_recv(cx) {
-            Poll::Pending => Poll::Ready(None),
-            poll => poll,
-        })
-        .await
-        {
-            actions.push(MockServiceAction::BroadcastTx(tx));
+        let txs = {
+            let mut txs = vec![];
+            let mut tx_receiver = self.tx_receiver.lock().await;
+
+            while let Some(tx) = poll_fn(|cx| match tx_receiver.poll_recv(cx) {
+                Poll::Pending => Poll::Ready(None),
+                poll => poll,
+            })
+            .await
+            {
+                txs.push(tx);
+            }
+
+            txs
+        };
+        if !txs.is_empty() {
+            actions.push(MockServiceAction::BroadcastTxs(txs));
         }
 
         actions
@@ -262,8 +271,8 @@ impl Drop for MockNode {
 impl MockNode {
     pub async fn handle_service_action(&self, action: MockServiceAction) {
         match action {
-            MockServiceAction::BroadcastTx(tx) => {
-                _ = self.broadcast_tx_sync_impl(tx.into());
+            MockServiceAction::BroadcastTxs(txs) => {
+                self.submit_txs(txs);
             }
             MockServiceAction::IncrementEthHeight => {
                 *self
